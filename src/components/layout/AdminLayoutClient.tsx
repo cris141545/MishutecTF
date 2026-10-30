@@ -42,7 +42,7 @@ export function AdminLayoutClient({
   }, [mobileOpen]);
 
   return (
-    <div className="h-screen h-[100dvh] flex overflow-hidden bg-slate-50 text-slate-900 font-sans antialiased selection:bg-blue-500/20 selection:text-blue-700">
+    <div className="h-screen h-[100dvh] flex overflow-hidden bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-sans antialiased selection:bg-blue-500/20 selection:text-blue-700">
       {/* Sidebar Escritorio (fijo para pantallas lg+) */}
       <div className="hidden lg:flex lg:flex-shrink-0 h-full">
         <Sidebar dbName={dbName} isAcademic={isAcademic} />
@@ -85,7 +85,7 @@ export function AdminLayoutClient({
       )}
 
       {/* Área Principal de Contenido - Con scroll independiente del Sidebar */}
-      <div className="flex-1 flex flex-col min-w-0 h-full overflow-y-auto bg-slate-50">
+      <div className="flex-1 flex flex-col min-w-0 h-full overflow-y-auto bg-slate-50 dark:bg-slate-950">
         <Header
           dbName={dbName}
           isAcademic={isAcademic}

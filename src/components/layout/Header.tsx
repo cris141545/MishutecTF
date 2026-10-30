@@ -9,6 +9,7 @@ import {
   UserCheck,
 } from "lucide-react";
 import { navItems } from "./Sidebar";
+import { ThemeToggle } from "@/components/theme/ThemeToggle";
 
 interface HeaderProps {
   onToggleMobile: () => void;
@@ -52,8 +53,11 @@ export function Header({ onToggleMobile, dbName, isAcademic }: HeaderProps) {
         </nav>
       </div>
 
-      {/* Lado Derecho: Estado de Base de Datos y Usuario Autenticado */}
+      {/* Lado Derecho: Selector de Tema + Base de Datos + Usuario Autenticado */}
       <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+        {/* Botón Circular Reveal Tema */}
+        <ThemeToggle />
+
         {/* Badge de Base de Datos Dinámica */}
         <div
           title={`Base de datos activa: ${dbName} (${isAcademic ? "Protegida" : "Aceptación"})`}

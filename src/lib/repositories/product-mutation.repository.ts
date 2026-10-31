@@ -1,4 +1,4 @@
-import sql from "mssql/msnodesqlv8";
+import sql from "mssql";
 import { getPool } from "@/lib/db";
 import { assertMutationsAllowed } from "@/lib/db-guard";
 import {

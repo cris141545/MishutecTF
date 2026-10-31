@@ -3,6 +3,8 @@
 import {
   fetchReturnDetail,
   fetchSaleForReturn,
+  fetchSaleCandidates,
+  fetchReturnReceipt,
   registerReturnTransactional,
   approveReturnTransactional,
   rejectReturnTransactional,
@@ -13,7 +15,9 @@ import {
   ReturnDetail,
   SaleForReturnSearch,
   TransactionalReturnResult,
+  ReturnReceiptData,
 } from "@/types/returns";
+import { SaleCandidate } from "@/lib/repositories/return-transaction.repository";
 import { maskCustomerContact } from "@/lib/formatters";
 
 /**
@@ -72,6 +76,15 @@ export async function searchSaleForReturnAction(
 }
 
 /**
+ * Server Action para buscar ventas candidatas por texto libre (comprobante, DNI, nombre, fecha).
+ */
+export async function searchSaleCandidatesAction(
+  query: string
+): Promise<ServiceResult<SaleCandidate[]>> {
+  return fetchSaleCandidates(query);
+}
+
+/**
  * Server Action para registrar transaccionalmente una nueva devolución (Fase 7B).
  */
 export async function createReturnAction(
@@ -96,4 +109,13 @@ export async function rejectReturnAction(
   rawInput: unknown
 ): Promise<ServiceResult<TransactionalReturnResult>> {
   return rejectReturnTransactional(rawInput);
+}
+
+/**
+ * Server Action para consultar la Constancia Comercial de Devolución formateada.
+ */
+export async function getReturnReceiptAction(
+  idDevolucion: number
+): Promise<ServiceResult<ReturnReceiptData>> {
+  return fetchReturnReceipt(idDevolucion);
 }

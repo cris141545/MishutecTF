@@ -33,7 +33,7 @@ Las restricciones imperativas del proyecto prohibieron estrictamente alterar las
 Para el pase a un servidor de producción dedicado, se ejecutará el siguiente script de mínimos privilegios en SQL Server:
 \`\`\`sql
 -- 1. Crear login y usuario dedicado de mínimos privilegios
-CREATE LOGIN usr_mishutec_app WITH PASSWORD = 'PasswordComplejo2026*!', CHECK_POLICY = ON;
+CREATE LOGIN usr_mishutec_app WITH PASSWORD = '<contraseña-segura-generada>', CHECK_POLICY = ON;
 USE MishutecT2_Aceptacion;
 CREATE USER usr_mishutec_app FOR LOGIN usr_mishutec_app;
 

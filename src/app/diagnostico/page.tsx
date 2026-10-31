@@ -1,5 +1,5 @@
 import { testDbDiagnostics, getPool } from "@/lib/db";
-import { getSession } from "@/lib/auth/session";
+import { getActiveSession } from "@/lib/auth/authorization";
 import { redirect } from "next/navigation";
 import {
   Database,
@@ -55,7 +55,7 @@ async function getProductsPreview(): Promise<ProductRow[]> {
 }
 
 export default async function DiagnosticoPage() {
-  const session = await getSession();
+  const session = await getActiveSession();
   if (!session) {
     redirect("/login?from=/diagnostico");
   }
@@ -63,10 +63,8 @@ export default async function DiagnosticoPage() {
   const diagnostics = await testDbDiagnostics();
   const products = diagnostics.success ? await getProductsPreview() : [];
 
-  const isValidDb = diagnostics.activeDatabase === "MishutecT2" || diagnostics.activeDatabase === "MishutecT2_Aceptacion";
-  const isValidProducts = diagnostics.productCount >= 10;
-  const isValidSales = diagnostics.saleCount >= 5;
-  const isAllValid = diagnostics.success && isValidDb && isValidProducts && isValidSales;
+  const isValidDb = diagnostics.success;
+  const isAllValid = diagnostics.success;
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900 p-6 md:p-10 font-sans">
@@ -83,7 +81,7 @@ export default async function DiagnosticoPage() {
                   MISHUTEC &bull; Diagnóstico Técnico
                 </h1>
                 <p className="text-sm text-slate-500">
-                  Panel de Verificación de Capa de Conexión a SQL Server Express
+                  Panel de Verificación de Conexión a SQL Server
                 </p>
               </div>
             </div>
@@ -138,14 +136,16 @@ export default async function DiagnosticoPage() {
 
           <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs">
             <div className="flex items-center justify-between text-slate-500 text-xs font-semibold uppercase tracking-wider">
-              <span>Usuario Autenticado</span>
+              <span>Principal SQL Server</span>
               <UserCheck className="h-4 w-4 text-blue-600" />
             </div>
             <div className="mt-3">
               <span className="text-base font-bold tracking-tight text-slate-900 truncate block">
-                {diagnostics.windowsUser}
+                {diagnostics.databaseUser}
               </span>
-              <p className="text-xs text-slate-500 mt-1">Windows Integrated Auth</p>
+              <p className="text-xs text-slate-500 mt-1">
+                {diagnostics.authMode === "windows" ? "Windows Auth" : "SQL Auth"}
+              </p>
             </div>
           </div>
 

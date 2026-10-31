@@ -11,7 +11,7 @@ export function InventoryAdjustmentsNotice() {
         </div>
         <div>
           <h3 className="text-sm font-bold text-slate-900">
-            Auditoría de Esquema: Tipo de Movimiento "Ajuste" (ID 3)
+            Auditoría de Esquema: Tipo de Movimiento &quot;Ajuste&quot; (ID 3)
           </h3>
           <p className="text-xs text-slate-500">
             Documentación de limitaciones del modelo relacional original de MishutecT2
@@ -57,9 +57,8 @@ export function InventoryAdjustmentsNotice() {
       <div className="p-3 rounded-lg bg-blue-50 border border-blue-200 text-xs text-slate-700 flex items-start gap-2">
         <FileText className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
         <span>
-          <strong>Decisión Arquitectónica (Fase 4):</strong> Las operaciones permitidas en producción son{" "}
-          <strong className="text-emerald-700">Entradas</strong> (+ stock) y{" "}
-          <strong className="text-blue-700">Salidas</strong> (- stock). Esto preserva la conciliación estricta{" "}
+          <strong>Decisión Arquitectónica:</strong> Las entradas (+ stock) solo se registran mediante una compra a proveedor;{" "}
+          las salidas (- stock) se registran desde Inventario. Esto preserva la conciliación estricta{" "}
           <code className="text-blue-700 font-semibold">Stock = TotalEntradas - TotalSalidas</code> al 100% en SQL Server.
         </span>
       </div>

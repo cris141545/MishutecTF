@@ -1,4 +1,4 @@
-import sql from "mssql/msnodesqlv8";
+import sql from "mssql";
 import { getPool } from "../db";
 import { assertMutationsAllowed } from "../db-guard";
 import { InventoryMovementInput } from "../validations/inventory-mutation.schema";
@@ -57,122 +57,10 @@ export interface MovementResult {
  * Registra una entrada física de inventario de forma estrictamente transaccional.
  */
 export async function recordInventoryEntryTransactional(
-  input: InventoryMovementInput
+  _input: InventoryMovementInput
 ): Promise<MovementResult> {
-  // Verificación incondicional de protección académica
-  assertMutationsAllowed("Registrar Entrada Inventario");
-
-  const pool = await getPool();
-  const tx = new sql.Transaction(pool);
-
-  await tx.begin();
-
-  try {
-    // 1. Validar existencia del empleado
-    const empReq = new sql.Request(tx);
-    empReq.input("idEmp", sql.Int, input.idEmpleado);
-    const empRes = await empReq.query(`
-      SELECT ID_empleado, CONCAT(Nombre_emp, ' ', Apellido_emp) AS EmpleadoNombre
-      FROM dbo.Empleado
-      WHERE ID_empleado = @idEmp;
-    `);
-
-    if (empRes.recordset.length === 0) {
-      throw new EmployeeNotFoundError(input.idEmpleado);
-    }
-    const empleadoNombre = empRes.recordset[0].EmpleadoNombre;
-
-    // 2. Bloquear la fila del producto de forma exclusiva (UPDLOCK, ROWLOCK)
-    const prodReq = new sql.Request(tx);
-    prodReq.input("codbarras", sql.VarChar(13), input.codbarras);
-    const prodRes = await prodReq.query(`
-      SELECT 
-        p.Codbarras_prod,
-        p.Nombre_prod,
-        p.Stock,
-        p.ID_estado_prod,
-        ep.Estado AS EstadoNombre
-      FROM dbo.Producto p WITH (UPDLOCK, ROWLOCK)
-      JOIN dbo.Estado_Prod ep ON p.ID_estado_prod = ep.ID_estado_prod
-      WHERE p.Codbarras_prod = @codbarras;
-    `);
-
-    if (prodRes.recordset.length === 0) {
-      throw new ProductNotFoundError(input.codbarras);
-    }
-
-    const prod = prodRes.recordset[0];
-    const stockAnterior = Number(prod.Stock);
-    const idEstadoAnterior = Number(prod.ID_estado_prod);
-    const estadoAnterior = prod.EstadoNombre;
-    const nombreProd = prod.Nombre_prod;
-
-    // Regla de negocio: No se permiten entradas sobre productos descontinuados
-    if (idEstadoAnterior === 3 || estadoAnterior.toLowerCase() === "descontinuado") {
-      throw new DiscontinuedProductOperationError(input.codbarras, nombreProd);
-    }
-
-    const stockNuevo = stockAnterior + input.cantidad;
-
-    // Si el producto estaba Agotado (ID 2 o Stock 0) y ahora tiene stock > 0, pasa a Disponible (ID 1)
-    let idEstadoNuevo = idEstadoAnterior;
-    let estadoNuevo = estadoAnterior;
-
-    if (idEstadoAnterior === 2 || stockAnterior === 0) {
-      idEstadoNuevo = 1; // Disponible
-      estadoNuevo = "Disponible";
-    }
-
-    // 3. Actualizar stock y estado en dbo.Producto
-    const updReq = new sql.Request(tx);
-    updReq.input("codbarras", sql.VarChar(13), input.codbarras);
-    updReq.input("newStock", sql.Int, stockNuevo);
-    updReq.input("newEstado", sql.Int, idEstadoNuevo);
-
-    await updReq.query(`
-      UPDATE dbo.Producto
-      SET 
-        Stock = @newStock,
-        ID_estado_prod = @newEstado
-      WHERE Codbarras_prod = @codbarras;
-    `);
-
-    // 4. Insertar registro en dbo.Mov_Inventario (ID_tipo_mov = 1: Entrada)
-    const movReq = new sql.Request(tx);
-    const fechaMov = input.fecha || new Date().toISOString().split("T")[0];
-    movReq.input("fecha", sql.Date, fechaMov);
-    movReq.input("cantidad", sql.Int, input.cantidad);
-    movReq.input("idTipoMov", sql.Int, 1); // 1 = Entrada
-    movReq.input("codbarras", sql.VarChar(13), input.codbarras);
-    movReq.input("idEmpleado", sql.Int, input.idEmpleado);
-
-    const movRes = await movReq.query(`
-      INSERT INTO dbo.Mov_Inventario (Fecha, Cantidad, ID_tipo_mov, Codbarras_prod, ID_empleado)
-      OUTPUT INSERTED.ID_movimiento
-      VALUES (@fecha, @cantidad, @idTipoMov, @codbarras, @idEmpleado);
-    `);
-
-    const idMovimiento = movRes.recordset[0].ID_movimiento;
-
-    await tx.commit();
-
-    return {
-      idMovimiento,
-      codbarras: input.codbarras,
-      nombreProducto: nombreProd,
-      tipoMovimiento: "Entrada",
-      cantidad: input.cantidad,
-      stockAnterior,
-      stockNuevo,
-      estadoAnterior,
-      estadoNuevo,
-      fecha: fechaMov,
-      empleado: empleadoNombre,
-    };
-  } catch (err) {
-    await tx.rollback();
-    throw err;
-  }
+  void _input;
+  throw new Error("El inventario solo puede aumentar al registrar una compra a proveedor.");
 }
 
 /**

@@ -3,6 +3,7 @@ import { getInventoryPageData } from "@/lib/services/inventory.service";
 import { getSession } from "@/lib/auth/session";
 import { isMutationAllowed } from "@/lib/db-guard";
 import { InventoryDashboardClient } from "@/components/inventory/InventoryDashboardClient";
+import { getCashDashboardData } from "@/lib/services/cash.service";
 import { Boxes, ShieldAlert, ShieldCheck } from "lucide-react";
 
 export const metadata: Metadata = {
@@ -22,7 +23,7 @@ export default async function InventarioPage({
 }: InventarioPageProps) {
   const resolvedSearchParams = await searchParams;
 
-  const [inventoryData, session] = await Promise.all([
+  const [inventoryData, session, cashData] = await Promise.all([
     getInventoryPageData({
       query: typeof resolvedSearchParams.query === "string" ? resolvedSearchParams.query : undefined,
       categoria: typeof resolvedSearchParams.categoria === "string" ? resolvedSearchParams.categoria : undefined,
@@ -33,6 +34,7 @@ export default async function InventarioPage({
       fechaFin: typeof resolvedSearchParams.fechaFin === "string" ? resolvedSearchParams.fechaFin : undefined,
     }),
     getSession(),
+    getCashDashboardData(),
   ]);
 
   const mutationGuard = isMutationAllowed();
@@ -84,6 +86,11 @@ export default async function InventarioPage({
         products={inventoryData.products}
         kardex={inventoryData.kardex}
         metadata={inventoryData.metadata}
+        suppliers={cashData.suppliers}
+        employees={cashData.employees}
+        paymentMethods={cashData.paymentMethods}
+        idSesion={cashData.activeSession?.idSesion ?? null}
+        efectivoDisponible={cashData.activeSession?.efectivoEsperadoActual ?? 0}
         isAuthenticated={!!session}
         username={session?.username ?? null}
       />

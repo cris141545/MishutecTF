@@ -322,6 +322,8 @@ export function ReportFilterBar({
 
               {[
                 { type: "kpis" as const, label: "Resumen Ejecutivo de KPIs", desc: "Métricas consolidadas" },
+                { type: "finanzas" as const, label: "Finanzas & Rentabilidad Real", desc: "COGS, margen bruto y utilidad" },
+                { type: "tributario" as const, label: "Resumen SUNAT (Formulario 621)", desc: "15.5% IGV + 2.5% IPM y crédito fiscal" },
                 { type: "ventas" as const, label: "Evolución de Ventas", desc: "Ventas por fecha y acumulados" },
                 { type: "productos" as const, label: "Top Productos Vendidos", desc: "Cantidades, facturación y stock" },
                 { type: "inventario" as const, label: "Inventario & Valoración", desc: "Categorías, stock bajo y retail" },

@@ -7,6 +7,7 @@ import {
   Package,
   Boxes,
   ShoppingCart,
+  Wallet,
   Users,
   Truck,
   UserCheck,
@@ -18,6 +19,7 @@ import {
   ShieldAlert,
   ExternalLink,
   LogOut,
+  UserPlus,
 } from "lucide-react";
 import { logoutAdminAction } from "@/lib/auth/actions";
 
@@ -33,23 +35,27 @@ export const navItems: NavItem[] = [
   { title: "Productos", href: "/productos", icon: Package },
   { title: "Inventario", href: "/inventario", icon: Boxes },
   { title: "Ventas", href: "/ventas", icon: ShoppingCart },
+  { title: "Caja", href: "/caja", icon: Wallet },
   { title: "Clientes", href: "/clientes", icon: Users },
   { title: "Proveedores", href: "/proveedores", icon: Truck },
   { title: "Empleados", href: "/empleados", icon: UserCheck },
   { title: "Devoluciones", href: "/devoluciones", icon: RotateCcw },
   { title: "Reportes", href: "/reportes", icon: BarChart3 },
+  { title: "Usuarios", href: "/usuarios", icon: UserPlus },
 ];
 
 interface SidebarProps {
   onNavigate?: () => void;
   dbName?: string;
   isAcademic?: boolean;
+  isAdmin?: boolean;
 }
 
 export function Sidebar({
   onNavigate,
   dbName = "MishutecT2_Aceptacion",
   isAcademic = false,
+  isAdmin = false,
 }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -84,36 +90,38 @@ export function Sidebar({
           Módulos del Sistema
         </div>
 
-        {navItems.map((item) => {
-          const Icon = item.icon;
-          const isActive = pathname === item.href;
+        {navItems
+          .filter((item) => item.href !== "/usuarios" || isAdmin)
+          .map((item) => {
+            const Icon = item.icon;
+            const isActive = pathname === item.href;
 
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              onClick={onNavigate}
-              prefetch={false}
-              className={`flex items-center justify-between px-3.5 min-h-[44px] rounded-lg text-xs font-medium transition-all group ${
-                isActive
-                  ? "bg-cyan-500/15 text-cyan-300 font-semibold border-l-2 border-cyan-400 pl-3"
-                  : "text-slate-400 hover:text-slate-100 hover:bg-slate-900/80"
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <Icon
-                  className={`h-4 w-4 transition-colors shrink-0 ${
-                    isActive ? "text-cyan-400" : "text-slate-400 group-hover:text-slate-300"
-                  }`}
-                />
-                <span>{item.title}</span>
-              </div>
-              {isActive && (
-                <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 shadow-sm shadow-cyan-400/50" />
-              )}
-            </Link>
-          );
-        })}
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={onNavigate}
+                prefetch={false}
+                className={`flex items-center justify-between px-3.5 min-h-[44px] rounded-lg text-xs font-medium transition-all group ${
+                  isActive
+                    ? "bg-cyan-500/15 text-cyan-300 font-semibold border-l-2 border-cyan-400 pl-3"
+                    : "text-slate-400 hover:text-slate-100 hover:bg-slate-900/80"
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <Icon
+                    className={`h-4 w-4 transition-colors shrink-0 ${
+                      isActive ? "text-cyan-400" : "text-slate-400 group-hover:text-slate-300"
+                    }`}
+                  />
+                  <span>{item.title}</span>
+                </div>
+                {isActive && (
+                  <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 shadow-sm shadow-cyan-400/50" />
+                )}
+              </Link>
+            );
+          })}
       </nav>
 
       {/* Database Connection Status Footer */}
@@ -145,7 +153,7 @@ export function Sidebar({
             ) : (
               <ShieldCheck className="h-3 w-3 text-emerald-400 shrink-0" />
             )}
-            Windows Auth
+            Acceso con cuenta
           </span>
           <Link
             href="/diagnostico"

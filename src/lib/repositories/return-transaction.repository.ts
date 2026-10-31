@@ -1,4 +1,4 @@
-import sql from "mssql/msnodesqlv8";
+import sql from "mssql";
 import { getPool } from "../db";
 import { assertMutationsAllowed } from "../db-guard";
 import {
@@ -116,6 +116,58 @@ export class ProductDiscontinuedRestockError extends ReturnTransactionError {
 // CONSULTA DE VENTA CON BALANCE DISPONIBLE (SOLO LECTURA)
 // ============================================================================
 
+export interface SaleCandidate {
+  idVenta: number;
+  numeroComprobante: string;
+  fechaVenta: string;
+  totalVenta: number;
+  tipoComprobante: string;
+  dniCliente: string;
+  nombreCliente: string;
+}
+
+/**
+ * Busca ventas candidatas por comprobante, DNI, nombre de cliente o fecha.
+ */
+export async function searchSaleCandidates(query: string): Promise<SaleCandidate[]> {
+  const pool = await getPool();
+  const req = pool.request();
+  const cleanTerm = query.trim();
+  req.input("term", sql.VarChar(100), `%${cleanTerm}%`);
+
+  const res = await req.query(`
+    SELECT TOP 15
+      v.ID_venta,
+      v.Numero_comprobante,
+      CONVERT(VARCHAR(10), v.Fecha_venta, 120) AS Fecha_venta,
+      CAST(v.Total_venta AS FLOAT) AS Total_venta,
+      tc.Nombre_tipo AS Tipo_comprobante,
+      v.Dni_cliente,
+      CONCAT(c.Nombre_cl, ' ', c.Apellido_cl) AS Nombre_cliente
+    FROM dbo.Venta v
+    JOIN dbo.Tipo_Comprobante tc ON v.ID_tipo_comp = tc.ID_tipo_comp
+    JOIN dbo.Cliente c ON v.Dni_cliente = c.Dni_cliente
+    WHERE 
+      v.Numero_comprobante LIKE @term
+      OR v.Dni_cliente LIKE @term
+      OR c.Nombre_cl LIKE @term
+      OR c.Apellido_cl LIKE @term
+      OR CONCAT(c.Nombre_cl, ' ', c.Apellido_cl) LIKE @term
+      OR CONVERT(VARCHAR(10), v.Fecha_venta, 120) LIKE @term
+    ORDER BY v.Fecha_venta DESC, v.ID_venta DESC;
+  `);
+
+  return res.recordset.map((r: any) => ({
+    idVenta: Number(r.ID_venta),
+    numeroComprobante: String(r.Numero_comprobante),
+    fechaVenta: String(r.Fecha_venta),
+    totalVenta: Number(r.Total_venta),
+    tipoComprobante: String(r.Tipo_comprobante),
+    dniCliente: String(r.Dni_cliente),
+    nombreCliente: String(r.Nombre_cliente),
+  }));
+}
+
 /**
  * Consulta una venta por número de comprobante o ID y calcula para cada línea vendida
  * el saldo real disponible aplicando la política estricta de reservas:
@@ -127,20 +179,25 @@ export async function getSaleWithAvailableBalances(
   const pool = await getPool();
 
   const req = pool.request();
-  const isNumeric = typeof identifier === "number" || /^\d+$/.test(String(identifier).trim());
+  const strId = String(identifier).trim();
+  const isNumeric = typeof identifier === "number" || /^\d+$/.test(strId);
 
   let whereClause = "";
-  if (isNumeric) {
-    req.input("idVenta", sql.Int, Number(identifier));
+  if (isNumeric && strId.length <= 6) {
+    req.input("idVenta", sql.Int, Number(strId));
     whereClause = "v.ID_venta = @idVenta";
+  } else if (isNumeric && strId.length === 8) {
+    // Si pasaron un DNI, buscar la venta más reciente de ese cliente
+    req.input("dniCliente", sql.Char(8), strId);
+    whereClause = "v.Dni_cliente = @dniCliente";
   } else {
-    req.input("voucher", sql.VarChar(20), String(identifier).trim());
-    whereClause = "v.Numero_comprobante = @voucher";
+    req.input("voucher", sql.VarChar(50), strId);
+    whereClause = "v.Numero_comprobante = @voucher OR v.Numero_comprobante LIKE '%' + @voucher + '%'";
   }
 
-  // 1. Obtener cabecera de la venta
+  // 1. Obtener cabecera de la venta (la más reciente si coincide más de una)
   const saleRes = await req.query(`
-    SELECT 
+    SELECT TOP 1
       v.ID_venta,
       v.Numero_comprobante,
       CONVERT(VARCHAR(10), v.Fecha_venta, 120) AS Fecha_venta,
@@ -154,7 +211,8 @@ export async function getSaleWithAvailableBalances(
     JOIN dbo.Tipo_Comprobante tc ON v.ID_tipo_comp = tc.ID_tipo_comp
     JOIN dbo.Cliente c ON v.Dni_cliente = c.Dni_cliente
     JOIN dbo.Empleado e ON v.ID_empleado = e.ID_empleado
-    WHERE ${whereClause};
+    WHERE ${whereClause}
+    ORDER BY v.Fecha_venta DESC, v.ID_venta DESC;
   `);
 
   if (saleRes.recordset.length === 0) {
@@ -585,7 +643,179 @@ export async function approveReturnTransaction(
       }
     }
 
-    // 5. Commit atómico
+    // 5. Emitir Nota de Crédito vinculada (SUNAT referencial / académico)
+    let notaCreditoData: TransactionalReturnResult["notaCredito"] | undefined = undefined;
+    const shouldEmitNc = input.emitirNotaCredito !== false;
+
+    if (shouldEmitNc) {
+      // Obtener total original de la venta
+      const saleTotReq = new sql.Request(transaction);
+      saleTotReq.input("idVenta", sql.Int, Number(dev.ID_venta));
+      const saleTotRes = await saleTotReq.query(`
+        SELECT Total_venta FROM dbo.Venta WHERE ID_venta = @idVenta;
+      `);
+      const totalVentaOrig = Number(saleTotRes.recordset[0]?.Total_venta || 0);
+
+      const tipoAjuste = montoEstimado >= totalVentaOrig - 0.01 ? "TOTAL" : "PARCIAL";
+
+      // Obtener siguiente correlativo NC01-XXXXXX
+      const ncSeqReq = new sql.Request(transaction);
+      const ncSeqRes = await ncSeqReq.query(`
+        SELECT ISNULL(MAX(ID_nota_credito), 0) + 1 AS NextId FROM dbo.Nota_Credito;
+      `);
+      const nextNcId = Number(ncSeqRes.recordset[0].NextId);
+      const numeroNota = `NC01-${String(nextNcId).padStart(6, "0")}`;
+
+      const montoSubtotal = Math.round((montoEstimado / 1.18) * 100) / 100;
+      const montoIgv = Math.round((montoEstimado - montoSubtotal) * 100) / 100;
+      const motivoNc =
+        input.motivoNotaCredito?.trim() ||
+        (tipoAjuste === "TOTAL"
+          ? "Anulación de la operación comercial"
+          : "Ajuste por devolución parcial de productos");
+
+      const insNcReq = new sql.Request(transaction);
+      insNcReq.input("numNota", sql.VarChar(20), numeroNota);
+      insNcReq.input("idVenta", sql.Int, Number(dev.ID_venta));
+      insNcReq.input("idDev", sql.Int, input.idDevolucion);
+      insNcReq.input("tipoAjuste", sql.VarChar(10), tipoAjuste);
+      insNcReq.input("motivo", sql.VarChar(250), motivoNc);
+      insNcReq.input("subtotal", sql.Decimal(10, 2), montoSubtotal);
+      insNcReq.input("igv", sql.Decimal(10, 2), montoIgv);
+      insNcReq.input("total", sql.Decimal(10, 2), montoEstimado);
+      insNcReq.input("idEmp", sql.Int, empIdToUse);
+
+      const insNcRes = await insNcReq.query(`
+        INSERT INTO dbo.Nota_Credito (
+          Numero_nota, ID_venta, ID_devolucion, Fecha_emision, Tipo_ajuste, Motivo,
+          Monto_subtotal, Monto_igv, Monto_total, ID_empleado, Estado, Es_simulacion_academica
+        )
+        OUTPUT INSERTED.ID_nota_credito
+        VALUES (
+          @numNota, @idVenta, @idDev, CAST(GETDATE() AS DATE), @tipoAjuste, @motivo,
+          @subtotal, @igv, @total, @idEmp, 'EMITIDA', 1
+        );
+      `);
+
+      const idNotaCredito = Number(insNcRes.recordset[0].ID_nota_credito);
+      notaCreditoData = {
+        idNotaCredito,
+        numeroNota,
+        montoTotal: montoEstimado,
+        montoSubtotal,
+        montoIgv,
+      };
+    }
+
+    // 6. Registrar Reembolso y Movimiento de Caja si aplica
+    let reembolsoData: TransactionalReturnResult["reembolso"] | undefined = undefined;
+    const idMetodoReembolso = input.idMetodoReembolso ?? 1; // Default 1 = Efectivo
+    const afectaEfectivo = idMetodoReembolso === 1;
+
+    // Obtener nombre del método de pago
+    const metReq = new sql.Request(transaction);
+    metReq.input("idMetodo", sql.Int, idMetodoReembolso);
+    const metRes = await metReq.query(`
+      SELECT Nombre_metodo FROM dbo.Metodo_Pago WHERE ID_metodo = @idMetodo;
+    `);
+    const nombreMetodo = metRes.recordset[0]?.Nombre_metodo || (afectaEfectivo ? "Efectivo" : "Digital");
+
+    // Verificar si hay una sesión de caja abierta
+    const sesReq = new sql.Request(transaction);
+    if (input.idSesionCaja) {
+      sesReq.input("idSesionParam", sql.Int, input.idSesionCaja);
+    }
+    const sesRes = await sesReq.query(`
+      SELECT TOP 1 ID_sesion 
+      FROM dbo.Sesion_Caja 
+      WHERE Estado = 'ABIERTA' ${input.idSesionCaja ? "AND ID_sesion = @idSesionParam" : ""}
+      ORDER BY ID_sesion DESC;
+    `);
+    const idSesionActiva = sesRes.recordset[0] ? Number(sesRes.recordset[0].ID_sesion) : null;
+
+    // Insertar en dbo.Reembolso_Devolucion
+    const insReembReq = new sql.Request(transaction);
+    insReembReq.input("idDev", sql.Int, input.idDevolucion);
+    insReembReq.input("idVenta", sql.Int, Number(dev.ID_venta));
+    insReembReq.input("idMetodo", sql.Int, idMetodoReembolso);
+    insReembReq.input("monto", sql.Decimal(10, 2), montoEstimado);
+    insReembReq.input("idEmp", sql.Int, empIdToUse);
+    insReembReq.input("idSesion", sql.Int, idSesionActiva);
+    insReembReq.input(
+      "referencia",
+      sql.VarChar(100),
+      input.referenciaReembolso || (afectaEfectivo ? "Reembolso en efectivo en caja" : `Reembolso por ${nombreMetodo}`)
+    );
+
+    const insReembRes = await insReembReq.query(`
+      INSERT INTO dbo.Reembolso_Devolucion (
+        ID_devolucion, ID_venta, ID_metodo, Monto, Fecha_hora, ID_empleado, ID_sesion, Referencia
+      )
+      OUTPUT INSERTED.ID_reembolso
+      VALUES (
+        @idDev, @idVenta, @idMetodo, @monto, GETDATE(), @idEmp, @idSesion, @referencia
+      );
+    `);
+
+    const idReembolso = Number(insReembRes.recordset[0].ID_reembolso);
+    reembolsoData = {
+      idReembolso,
+      metodo: nombreMetodo,
+      monto: montoEstimado,
+      afectaEfectivo,
+    };
+
+    // Si hay sesión de caja abierta, registrar el movimiento de caja correspondiente
+    if (idSesionActiva) {
+      const insMovReq = new sql.Request(transaction);
+      insMovReq.input("idSesion", sql.Int, idSesionActiva);
+      insMovReq.input("monto", sql.Decimal(10, 2), montoEstimado);
+      insMovReq.input("idMetodo", sql.Int, idMetodoReembolso);
+      insMovReq.input(
+        "concepto",
+        sql.VarChar(200),
+        `Reembolso devolución #${input.idDevolucion} (${afectaEfectivo ? "Efectivo en caja" : nombreMetodo})`
+      );
+      insMovReq.input("idEmp", sql.Int, empIdToUse);
+      insMovReq.input("idVenta", sql.Int, Number(dev.ID_venta));
+      insMovReq.input("idDev", sql.Int, input.idDevolucion);
+      insMovReq.input("afectaEfectivo", sql.Bit, afectaEfectivo ? 1 : 0);
+
+      await insMovReq.query(`
+        INSERT INTO dbo.Movimiento_Caja (
+          ID_sesion, Fecha_hora, Tipo, Categoria, Monto, ID_metodo, Concepto, ID_empleado, ID_venta, ID_devolucion, Afecta_efectivo
+        )
+        VALUES (
+          @idSesion, GETDATE(), 'EGRESO', 'REEMBOLSO_DEVOLUCION', @monto, @idMetodo, @concepto, @idEmp, @idVenta, @idDev, @afectaEfectivo
+        );
+      `);
+    }
+
+    // 7. Actualizar Estado de la Venta (COMPLETADA -> PARCIALMENTE DEVUELTA o TOTALMENTE DEVUELTA)
+    const updateSaleStatusReq = new sql.Request(transaction);
+    updateSaleStatusReq.input("idVenta", sql.Int, Number(dev.ID_venta));
+    await updateSaleStatusReq.query(`
+      DECLARE @totVendidas INT;
+      DECLARE @totDevueltas INT;
+
+      SELECT @totVendidas = ISNULL(SUM(Cantidad), 0)
+      FROM dbo.Detalle_Venta WHERE ID_venta = @idVenta;
+
+      SELECT @totDevueltas = ISNULL(SUM(dd.Cantidad_dev), 0)
+      FROM dbo.Devolucion d
+      JOIN dbo.Detalle_Dev dd ON d.ID_devolucion = dd.ID_devolucion
+      WHERE d.ID_venta = @idVenta AND d.ID_estado_dev = 2; -- Aprobadas
+
+      UPDATE dbo.Venta
+      SET Estado = CASE 
+        WHEN @totDevueltas >= @totVendidas THEN 'TOTALMENTE DEVUELTA'
+        WHEN @totDevueltas > 0 THEN 'PARCIALMENTE DEVUELTA'
+        ELSE 'COMPLETADA'
+      END
+      WHERE ID_venta = @idVenta;
+    `);
+
+    // 8. Commit atómico
     await transaction.commit();
 
     return {
@@ -600,6 +830,8 @@ export async function approveReturnTransaction(
       montoEstimado,
       reingresoKardexRealizado,
       unidadesReingresadas,
+      notaCredito: notaCreditoData,
+      reembolso: reembolsoData,
     };
   } catch (err) {
     try {

@@ -15,9 +15,10 @@ interface HeaderProps {
   onToggleMobile: () => void;
   dbName: string;
   isAcademic: boolean;
+  username: string;
 }
 
-export function Header({ onToggleMobile, dbName, isAcademic }: HeaderProps) {
+export function Header({ onToggleMobile, dbName, isAcademic, username }: HeaderProps) {
   const pathname = usePathname();
 
   // Obtener el título del módulo actual a partir de la ruta
@@ -75,17 +76,17 @@ export function Header({ onToggleMobile, dbName, isAcademic }: HeaderProps) {
           />
         </div>
 
-        {/* Badge de Usuario Windows */}
+        {/* Usuario autenticado */}
         <div className="flex items-center gap-1.5 sm:gap-2 px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-xs shadow-xs">
           <div className="h-6 w-6 rounded-full bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600 shrink-0">
             <UserCheck className="h-3.5 w-3.5" />
           </div>
           <div className="hidden sm:flex flex-col text-left">
             <span className="text-[11px] font-semibold text-slate-800 leading-tight">
-              Operador Local
+              {username}
             </span>
             <span className="text-[10px] text-slate-500 leading-tight">
-              Windows Auth
+              Cuenta Mishutec
             </span>
           </div>
         </div>

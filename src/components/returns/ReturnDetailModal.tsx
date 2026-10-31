@@ -1,12 +1,15 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { ReturnDetail } from "@/types/returns";
+import { ReturnDetail, ReturnReceiptData } from "@/types/returns";
 import { formatCurrency, formatDate } from "@/lib/formatters";
 import {
   approveReturnAction,
   rejectReturnAction,
+  getReturnReceiptAction,
 } from "@/lib/actions/return.actions";
+import { ReturnReceiptModal } from "./ReturnReceiptModal";
+import { CreditNoteModal } from "./CreditNoteModal";
 import {
   X,
   RotateCcw,
@@ -23,6 +26,8 @@ import {
   Layers,
   ArrowRight,
   Package,
+  Receipt,
+  FileCheck2,
 } from "lucide-react";
 
 interface ReturnDetailModalProps {
@@ -36,6 +41,30 @@ export function ReturnDetailModal({ detail, onClose, onActionComplete }: ReturnD
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [reingresoStock, setReingresoStock] = useState(false);
+  const [idMetodoReembolso, setIdMetodoReembolso] = useState<number>(1); // 1 = Efectivo
+  const [emitirNotaCredito, setEmitirNotaCredito] = useState<boolean>(true);
+  const [motivoNotaCredito, setMotivoNotaCredito] = useState<string>("");
+  const [receiptData, setReceiptData] = useState<ReturnReceiptData | null>(null);
+  const [showReceiptModal, setShowReceiptModal] = useState(false);
+  const [showCreditNoteModal, setShowCreditNoteModal] = useState(false);
+  const [loadingReceipt, setLoadingReceipt] = useState(false);
+
+  const handleOpenReceipt = async () => {
+    try {
+      setLoadingReceipt(true);
+      const res = await getReturnReceiptAction(detail.idDevolucion);
+      if (res.success && res.data) {
+        setReceiptData(res.data);
+        setShowReceiptModal(true);
+      } else {
+        setActionError(res.error || "No se pudo cargar la constancia de devolución.");
+      }
+    } catch (err: any) {
+      setActionError(err.message || "Error al generar constancia.");
+    } finally {
+      setLoadingReceipt(false);
+    }
+  };
 
   // Comprobar si tiene algún ítem con motivo 'Producto equivocado' (ID = 2)
   const hasWrongProduct = detail.lineasDevolucion.some((l) => l.idMotivo === 2);
@@ -66,6 +95,9 @@ export function ReturnDetailModal({ detail, onClose, onActionComplete }: ReturnD
       const res = await approveReturnAction({
         idDevolucion: detail.idDevolucion,
         reingresoStock: hasWrongProduct ? reingresoStock : false,
+        idMetodoReembolso,
+        emitirNotaCredito,
+        motivoNotaCredito: motivoNotaCredito.trim() || undefined,
       });
 
       if (!res.success || !res.data) {
@@ -73,10 +105,15 @@ export function ReturnDetailModal({ detail, onClose, onActionComplete }: ReturnD
         return;
       }
 
+      const ncMsg = res.data.notaCredito
+        ? ` Nota de Crédito ${res.data.notaCredito.numeroNota} emitida.`
+        : "";
+
       setActionSuccess(
-        res.data.reingresoKardexRealizado
+        (res.data.reingresoKardexRealizado
           ? `Devolución #${detail.idDevolucion} aprobada exitosamente. Se reingresaron ${res.data.unidadesReingresadas} unidades al inventario (Kardex).`
-          : `Devolución #${detail.idDevolucion} aprobada exitosamente. Sin alteración de stock comercial.`
+          : `Devolución #${detail.idDevolucion} aprobada exitosamente. Sin alteración de stock comercial.`) +
+          ncMsg
       );
 
       if (onActionComplete) {
@@ -265,6 +302,110 @@ export function ReturnDetailModal({ detail, onClose, onActionComplete }: ReturnD
             </div>
           </div>
 
+          {/* Desglose Financiero: Devuelto vs Conservado */}
+          <div className="p-4 rounded-xl bg-gradient-to-r from-slate-50 to-blue-50/40 border border-slate-200 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                Desglose Financiero de la Operación
+              </span>
+              <span
+                className={`text-[11px] font-bold px-2 py-0.5 rounded-md ${
+                  detail.montoEstimadoDevuelto >= detail.totalVenta - 0.01
+                    ? "bg-rose-100 text-rose-800 border border-rose-200"
+                    : "bg-blue-100 text-blue-800 border border-blue-200"
+                }`}
+              >
+                {detail.montoEstimadoDevuelto >= detail.totalVenta - 0.01
+                  ? "Devolución Total (Anulación de Comprobante)"
+                  : "Devolución Parcial (Ajuste de Comprobante)"}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+              <div className="bg-white p-2.5 rounded-lg border border-slate-200">
+                <span className="text-[10px] text-slate-500 block uppercase font-semibold">Total Venta Original</span>
+                <span className="text-sm font-bold text-slate-900 font-mono">{formatCurrency(detail.totalVenta)}</span>
+              </div>
+              <div className="bg-white p-2.5 rounded-lg border border-slate-200">
+                <span className="text-[10px] text-rose-600 block uppercase font-semibold">Importe Devuelto / Reembolsado</span>
+                <span className="text-sm font-bold text-rose-600 font-mono">-{formatCurrency(detail.montoEstimadoDevuelto)}</span>
+              </div>
+              <div className="bg-white p-2.5 rounded-lg border border-slate-200">
+                <span className="text-[10px] text-emerald-600 block uppercase font-semibold">Importe Conservado por Cliente</span>
+                <span className="text-sm font-bold text-emerald-700 font-mono">
+                  {formatCurrency(detail.montoConservado ?? Math.max(0, detail.totalVenta - detail.montoEstimadoDevuelto))}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Tarjeta de Nota de Crédito si ya fue emitida */}
+          {detail.notaCredito && (
+            <div className="p-4 rounded-xl bg-purple-50/70 border border-purple-200 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-purple-700" />
+                  <span className="text-xs font-bold text-purple-900 uppercase tracking-wider">
+                    Nota de Crédito Vinculada: {detail.notaCredito.numeroNota}
+                  </span>
+                </div>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-200 text-purple-900">
+                  {detail.notaCredito.esSimulacionAcademica ? "Simulación Académica / Referencial SUNAT" : "Emitida"}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                <div>
+                  <span className="text-[10px] text-slate-500 block">Fecha Emisión:</span>
+                  <span className="font-semibold text-slate-800">{formatDate(detail.notaCredito.fechaEmision)}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-500 block">Tipo Ajuste:</span>
+                  <span className="font-bold text-purple-800">{detail.notaCredito.tipoAjuste}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-500 block">Base Imponible:</span>
+                  <span className="font-semibold font-mono text-slate-800">{formatCurrency(detail.notaCredito.montoSubtotal)}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-500 block">Monto Total NC (con IGV):</span>
+                  <span className="font-bold font-mono text-purple-900">{formatCurrency(detail.notaCredito.montoTotal)}</span>
+                </div>
+              </div>
+              <p className="text-[11px] text-slate-600 italic">
+                <strong>Motivo NC:</strong> {detail.notaCredito.motivo}
+              </p>
+            </div>
+          )}
+
+          {/* Tarjeta de Reembolso si ya fue efectuado */}
+          {detail.reembolso && (
+            <div className="p-4 rounded-xl bg-emerald-50/70 border border-emerald-200 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <RotateCcw className="w-4 h-4 text-emerald-700" />
+                  <span className="text-xs font-bold text-emerald-900 uppercase tracking-wider">
+                    Reembolso Efectuado: {detail.reembolso.nombreMetodo}
+                  </span>
+                </div>
+                <span className="text-xs font-bold text-emerald-800 font-mono">
+                  {formatCurrency(detail.reembolso.monto)}
+                </span>
+              </div>
+              <div className="text-xs text-slate-700 flex flex-wrap gap-x-4 gap-y-1">
+                <span>Fecha: <strong>{detail.reembolso.fechaHora}</strong></span>
+                <span>
+                  Afectación:{" "}
+                  <strong className={detail.reembolso.afectaEfectivo ? "text-emerald-800" : "text-blue-800"}>
+                    {detail.reembolso.afectaEfectivo ? "Descontado de efectivo en caja física" : "Medio digital (no descuenta gaveta)"}
+                  </strong>
+                </span>
+                {detail.reembolso.referencia && (
+                  <span>Referencia: <em>{detail.reembolso.referencia}</em></span>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Bloque 2: Líneas Involucradas en esta Devolución */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
@@ -397,6 +538,66 @@ export function ReturnDetailModal({ detail, onClose, onActionComplete }: ReturnD
                 </span>
               </div>
 
+              {/* Opciones de Reembolso y Ajuste Documentario */}
+              <div className="p-3.5 rounded-xl bg-white border border-slate-200 space-y-3">
+                <span className="text-xs font-bold text-slate-800 uppercase tracking-wider block">
+                  Configuración de Reembolso y Nota de Crédito
+                </span>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                      Medio para Efectuar el Reembolso
+                    </label>
+                    <select
+                      value={idMetodoReembolso}
+                      onChange={(e) => setIdMetodoReembolso(Number(e.target.value))}
+                      disabled={isProcessing}
+                      className="w-full px-3 py-1.5 text-xs rounded-lg border border-slate-300 bg-white text-slate-900 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    >
+                      <option value={1}>Efectivo (Descuenta saldo físico de caja)</option>
+                      <option value={4}>Yape / Plin (Digital - No descuenta efectivo de gaveta)</option>
+                      <option value={2}>Tarjeta de Crédito / Débito (Bancarizado)</option>
+                      <option value={3}>Transferencia Bancaria (BCP / BBVA)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                      Emisión de Nota de Crédito
+                    </label>
+                    <label className="flex items-center gap-2 mt-1 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={emitirNotaCredito}
+                        onChange={(e) => setEmitirNotaCredito(e.target.checked)}
+                        disabled={isProcessing}
+                        className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                      />
+                      <span className="text-xs font-medium text-slate-800">
+                        Generar correlativo NC01 (SUNAT Formulario 621)
+                      </span>
+                    </label>
+                  </div>
+                </div>
+
+                {emitirNotaCredito && (
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                      Motivo de la Nota de Crédito (Opcional)
+                    </label>
+                    <input
+                      type="text"
+                      value={motivoNotaCredito}
+                      onChange={(e) => setMotivoNotaCredito(e.target.value)}
+                      disabled={isProcessing}
+                      placeholder="Ej. Devolución de producto y reembolso al cliente..."
+                      className="w-full px-3 py-1.5 text-xs rounded-lg border border-slate-300 text-slate-900 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+                )}
+              </div>
+
               {/* Opción de Reingreso Físico (Solo si hay Producto equivocado) */}
               {hasWrongProduct ? (
                 <div className="p-3 rounded-lg bg-white border border-slate-200 space-y-2">
@@ -476,19 +677,64 @@ export function ReturnDetailModal({ detail, onClose, onActionComplete }: ReturnD
         </div>
 
         {/* Pie Fijo */}
-        <div className="p-4 sm:p-5 border-t border-slate-200 bg-slate-50/80 flex items-center justify-between shrink-0">
+        <div className="p-4 sm:p-5 border-t border-slate-200 bg-slate-50/80 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
           <div className="text-[11px] text-slate-500 font-mono">
             ID Trámite: #{detail.idDevolucion} | Venta: #{detail.idVenta}
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 rounded-xl bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 font-semibold text-xs transition-colors shadow-xs"
-          >
-            Cerrar Ficha
-          </button>
+
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            {detail.idEstadoDev === 2 && (
+              <>
+                <button
+                  type="button"
+                  onClick={handleOpenReceipt}
+                  disabled={loadingReceipt}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-700 text-white font-semibold text-xs shadow-xs transition-colors cursor-pointer"
+                >
+                  <Receipt className="h-4 w-4" />
+                  <span>{loadingReceipt ? "Cargando..." : "Constancia Comercial"}</span>
+                </button>
+
+                {detail.notaCredito && (
+                  <button
+                    type="button"
+                    onClick={() => setShowCreditNoteModal(true)}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs shadow-xs transition-colors cursor-pointer"
+                  >
+                    <FileCheck2 className="h-4 w-4 text-cyan-400" />
+                    <span>Nota de Crédito</span>
+                  </button>
+                )}
+              </>
+            )}
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 rounded-xl bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 font-semibold text-xs transition-colors shadow-xs"
+            >
+              Cerrar Ficha
+            </button>
+          </div>
         </div>
       </div>
+
+      {/* Modal de Constancia Comercial Imprimible */}
+      <ReturnReceiptModal
+        receipt={receiptData}
+        isOpen={showReceiptModal}
+        onClose={() => setShowReceiptModal(false)}
+      />
+
+      {/* Modal de Nota de Crédito */}
+      <CreditNoteModal
+        creditNote={detail.notaCredito || null}
+        saleVoucherNumber={detail.numeroComprobante}
+        clientName={detail.clienteNombre}
+        clientDni={detail.dniCliente}
+        isOpen={showCreditNoteModal}
+        onClose={() => setShowCreditNoteModal(false)}
+      />
     </div>
   );
 }

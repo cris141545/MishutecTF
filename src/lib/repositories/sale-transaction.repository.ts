@@ -1,4 +1,4 @@
-import sql from "mssql/msnodesqlv8";
+import sql from "mssql";
 import { getPool } from "../db";
 import { assertMutationsAllowed } from "../db-guard";
 import { SaleInput } from "../validations/sale.schema";
@@ -102,6 +102,8 @@ export interface TransactionalSaleResult {
     nombreMetodo: string;
     monto: number;
   }>;
+  efectivoRecibido?: number;
+  vuelto?: number;
 }
 
 /**
@@ -259,22 +261,73 @@ export async function executeSaleTransaction(
 
     const totalVenta = totalVentaCents / 100;
 
-    // 12. Validar que la suma exacta de los medios de pago coincida con el total de la orden
-    let totalPagosCents = 0;
-    const finalPayments: Array<{ idMetodo: number; nombreMetodo: string; monto: number }> = [];
+    // 12. Validación y conciliación de medios de pago (soporte de efectivo con vuelto y pagos mixtos)
+    let totalNoEfectivoCents = 0;
+    let cashMontoCents = 0;
+    const hasCash = consolidatedPaymentsMap.has(1);
 
     for (const [idMetodo, monto] of consolidatedPaymentsMap.entries()) {
-      const montoCents = Math.round(monto * 100);
-      totalPagosCents += montoCents;
-      finalPayments.push({
-        idMetodo,
-        nombreMetodo: methodNamesMap.get(idMetodo) || `Método #${idMetodo}`,
-        monto: montoCents / 100,
-      });
+      const mCents = Math.round(monto * 100);
+      if (idMetodo === 1) {
+        cashMontoCents = mCents;
+      } else {
+        totalNoEfectivoCents += mCents;
+      }
     }
 
-    if (totalPagosCents !== totalVentaCents) {
-      throw new PaymentMismatchError(totalVenta, totalPagosCents / 100);
+    // Regla de Negocio 1: Los métodos electrónicos/digitales no pueden exceder el total de la venta
+    if (totalNoEfectivoCents > totalVentaCents) {
+      throw new PaymentMismatchError(
+        totalVenta,
+        totalNoEfectivoCents / 100
+      );
+    }
+
+    const restantePorCubrirCents = totalVentaCents - totalNoEfectivoCents;
+
+    let efectivoRecibido: number | null = null;
+    let vuelto = 0;
+
+    if (hasCash || (input.efectivoRecibido && input.efectivoRecibido > 0)) {
+      // Determinamos el efectivo efectivamente entregado por el cliente
+      const efectivoEntregado =
+        input.efectivoRecibido !== undefined
+          ? Number(input.efectivoRecibido)
+          : cashMontoCents / 100;
+      const efectivoEntregadoCents = Math.round(efectivoEntregado * 100);
+
+      // Si el efectivo entregado no cubre el saldo restante de la venta
+      if (efectivoEntregadoCents < restantePorCubrirCents) {
+        throw new PaymentMismatchError(
+          totalVenta,
+          (totalNoEfectivoCents + efectivoEntregadoCents) / 100
+        );
+      }
+
+      // El vuelto procede exclusivamente del exceso de efectivo entregado
+      const vueltoCents = efectivoEntregadoCents - restantePorCubrirCents;
+      vuelto = vueltoCents / 100;
+      efectivoRecibido = efectivoEntregado;
+
+      // El importe neto cobrado en efectivo para registrar en la venta y caja es exactamente el saldo de la orden
+      consolidatedPaymentsMap.set(1, restantePorCubrirCents / 100);
+    } else {
+      // Venta 100% digital / electrónica: debe cuadrar al centavo
+      if (totalNoEfectivoCents !== totalVentaCents) {
+        throw new PaymentMismatchError(totalVenta, totalNoEfectivoCents / 100);
+      }
+    }
+
+    // Construcción final de pagos asignados a la venta (coincidencia matemática exacta 1:1 con totalVenta)
+    const finalPayments: Array<{ idMetodo: number; nombreMetodo: string; monto: number }> = [];
+    for (const [idMetodo, monto] of consolidatedPaymentsMap.entries()) {
+      if (monto > 0 || consolidatedPaymentsMap.size === 1) {
+        finalPayments.push({
+          idMetodo,
+          nombreMetodo: methodNamesMap.get(idMetodo) || `Método #${idMetodo}`,
+          monto: Math.round(monto * 100) / 100,
+        });
+      }
     }
 
     // 13. Obtención atómica y segura del correlativo mediante sys.sp_getapplock
@@ -326,6 +379,8 @@ export async function executeSaleTransaction(
     insertVentaReq.input("idTipoComp", sql.Int, input.idTipoComp);
     insertVentaReq.input("dniCliente", sql.VarChar(8), input.dniCliente);
     insertVentaReq.input("idEmpleado", sql.Int, input.idEmpleado);
+    insertVentaReq.input("efectivoRecibido", sql.Decimal(10, 2), efectivoRecibido);
+    insertVentaReq.input("vuelto", sql.Decimal(10, 2), vuelto > 0 ? vuelto : 0);
 
     const ventaRes = await insertVentaReq.query(`
       INSERT INTO dbo.Venta (
@@ -334,7 +389,10 @@ export async function executeSaleTransaction(
         Numero_comprobante,
         ID_tipo_comp,
         Dni_cliente,
-        ID_empleado
+        ID_empleado,
+        Estado,
+        Efectivo_recibido,
+        Vuelto
       )
       OUTPUT INSERTED.ID_venta, CONVERT(VARCHAR(10), INSERTED.Fecha_venta, 120) AS FechaStr
       VALUES (
@@ -343,7 +401,10 @@ export async function executeSaleTransaction(
         @numeroComp,
         @idTipoComp,
         @dniCliente,
-        @idEmpleado
+        @idEmpleado,
+        'COMPLETADA',
+        @efectivoRecibido,
+        @vuelto
       );
     `);
 
@@ -461,6 +522,42 @@ export async function executeSaleTransaction(
       });
     }
 
+    // 19.5 Integración automática con Caja (si existe sesión activa)
+    const activeSesReq = new sql.Request(transaction);
+    const activeSesRes = await activeSesReq.query(`
+      SELECT TOP 1 ID_sesion
+      FROM dbo.Sesion_Caja WITH (UPDLOCK)
+      WHERE Estado IN ('ABIERTA', 'REABIERTA')
+      ORDER BY ID_sesion DESC
+    `);
+
+    if (activeSesRes.recordset.length > 0) {
+      const idSesionActiva = activeSesRes.recordset[0].ID_sesion;
+      for (const p of finalPayments) {
+        const movReq = new sql.Request(transaction);
+        movReq.input("idSesion", sql.Int, idSesionActiva);
+        movReq.input("monto", sql.Decimal(12, 2), p.monto);
+        movReq.input("idMetodo", sql.Int, p.idMetodo);
+        movReq.input(
+          "concepto",
+          sql.VarChar(255),
+          `Cobro venta ${numeroComprobante} - ${p.nombreMetodo}`
+        );
+        movReq.input("idEmp", sql.Int, input.idEmpleado);
+        movReq.input("idVenta", sql.Int, idVenta);
+        movReq.input("afectaEf", sql.Bit, p.idMetodo === 1 ? 1 : 0);
+
+        await movReq.query(`
+          INSERT INTO dbo.Movimiento_Caja (
+            ID_sesion, Fecha_hora, Tipo, Categoria, Monto, ID_metodo, Concepto, ID_empleado, ID_venta, Afecta_efectivo
+          )
+          VALUES (
+            @idSesion, GETDATE(), 'INGRESO', 'VENTA', @monto, @idMetodo, @concepto, @idEmp, @idVenta, @afectaEf
+          );
+        `);
+      }
+    }
+
     // 20. Confirmación Atómica (COMMIT TRANSACTION)
     await transaction.commit();
 
@@ -477,6 +574,8 @@ export async function executeSaleTransaction(
       empleadoNombre,
       items: finalItemsResult,
       pagos: finalPayments,
+      efectivoRecibido: efectivoRecibido ?? undefined,
+      vuelto: vuelto > 0 ? vuelto : 0,
     };
   } catch (err: any) {
     // Si la transacción sigue activa, revertir completamente
@@ -511,3 +610,6 @@ export async function executeSaleTransaction(
     throw err;
   }
 }
+
+export { executeSaleTransaction as createSaleTransaction };
+export type TransactionalSaleInput = SaleInput;

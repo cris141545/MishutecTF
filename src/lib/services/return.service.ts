@@ -1,13 +1,16 @@
 import { revalidatePath } from "next/cache";
-import { requireAdminSession } from "../auth/session";
+import { requireAdminSession } from "../auth/authorization";
 import {
   getReturnsList,
   getReturnKpiMetrics,
   getReturnFilterMetadata,
   getReturnById,
+  getReturnReceiptData,
 } from "../repositories/return.repository";
 import {
   getSaleWithAvailableBalances,
+  searchSaleCandidates,
+  SaleCandidate,
   createReturnTransaction,
   approveReturnTransaction,
   rejectReturnTransaction,
@@ -23,6 +26,7 @@ import {
   ReturnDetail,
   SaleForReturnSearch,
   TransactionalReturnResult,
+  ReturnReceiptData,
 } from "@/types/returns";
 
 export interface ServiceResult<T> {
@@ -185,6 +189,8 @@ export async function approveReturnTransactional(
     const result = await approveReturnTransaction(parsed.data, parsed.data.idEmpleado || 1);
 
     revalidatePath("/devoluciones");
+    revalidatePath("/caja");
+    revalidatePath("/reportes");
     if (result.reingresoKardexRealizado) {
       revalidatePath("/inventario");
       revalidatePath("/dashboard");
@@ -257,6 +263,68 @@ export async function rejectReturnTransactional(
       success: false,
       error: error.message || "Error al rechazar la devolución.",
       statusCode,
+    };
+  }
+}
+
+/**
+ * Servicio para buscar ventas candidatas (por comprobante, DNI, cliente o fecha).
+ */
+export async function fetchSaleCandidates(
+  query: string
+): Promise<ServiceResult<SaleCandidate[]>> {
+  try {
+    await requireAdminSession();
+    if (!query || query.trim().length < 2) {
+      return {
+        success: true,
+        data: [],
+        statusCode: 200,
+      };
+    }
+    const candidates = await searchSaleCandidates(query);
+    return {
+      success: true,
+      data: candidates,
+      statusCode: 200,
+    };
+  } catch (error: any) {
+    console.error("Error en fetchSaleCandidates:", error);
+    return {
+      success: false,
+      error: error.message || "Error al buscar candidatos de venta.",
+      statusCode: 500,
+    };
+  }
+}
+
+/**
+ * Servicio para obtener los datos de la Constancia Comercial de Devolución.
+ */
+export async function fetchReturnReceipt(
+  idDevolucion: number
+): Promise<ServiceResult<ReturnReceiptData>> {
+  try {
+    await requireAdminSession();
+    const receipt = await getReturnReceiptData(idDevolucion);
+    if (!receipt) {
+      return {
+        success: false,
+        error: `No se encontró la devolución con ID #${idDevolucion}.`,
+        statusCode: 404,
+      };
+    }
+    return {
+      success: true,
+      data: receipt,
+      statusCode: 200,
+    };
+  } catch (error: any) {
+    console.error("Error en fetchReturnReceipt:", error);
+    return {
+      success: false,
+      error: error.message || "Error al recuperar la constancia de devolución.",
+      statusCode: 500,
     };
   }
 }

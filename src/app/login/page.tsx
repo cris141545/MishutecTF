@@ -1,12 +1,12 @@
 import { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { getSession } from "@/lib/auth/session";
+import { getActiveSession } from "@/lib/auth/authorization";
 import { sanitizeRedirectUrl } from "@/lib/auth/redirect";
 import { LoginForm } from "./LoginForm";
 
 export const metadata: Metadata = {
-  title: "Inicio de Sesión Administrativa | MISHUTEC",
-  description: "Acceso seguro al panel de administración del sistema comercial Mishutec.",
+  title: "Iniciar sesión | MISHUTEC",
+  description: "Acceso seguro al sistema comercial Mishutec.",
 };
 
 export const dynamic = "force-dynamic";
@@ -16,16 +16,13 @@ export default async function LoginPage({
 }: {
   searchParams: Promise<{ from?: string }>;
 }) {
-  const session = await getSession();
+  const session = await getActiveSession();
   const params = await searchParams;
   const fromUrl = sanitizeRedirectUrl(params?.from);
 
   if (session) {
     redirect(fromUrl);
   }
-
-  const dbName = process.env.DB_NAME || "MishutecT2_Aceptacion";
-  const isAcademic = dbName.toLowerCase() === "mishutect2";
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900 flex flex-col justify-center items-center p-4 selection:bg-blue-500/20 selection:text-blue-700">
@@ -50,11 +47,7 @@ export default async function LoginPage({
 
         {/* Footer Técnico */}
         <div className="text-center text-[11px] text-slate-500 space-y-1">
-          <div>
-            Base activa: <span className="font-semibold text-slate-700">{dbName}</span>{" "}
-            ({isAcademic ? "Modo Protegido" : "Entorno Aceptación"})
-          </div>
-          <div>SQL Server Express &bull; Windows Authentication &bull; Next.js 16</div>
+          <div>Acceso individual &bull; SQL Server &bull; Next.js</div>
         </div>
       </div>
     </main>

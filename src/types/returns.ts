@@ -1,7 +1,8 @@
 /**
- * Tipos de datos para el módulo de Devoluciones y Garantías (Fase 7A).
+ * Tipos de datos para el módulo de Devoluciones, Garantías, Notas de Crédito y Reembolsos.
  * Estructuras estrictamente alineadas al esquema físico de SQL Server:
- * dbo.Devolucion, dbo.Detalle_Dev, dbo.Estado_Dev, dbo.Motivo_Dev, dbo.Venta, dbo.Detalle_Venta, dbo.Producto.
+ * dbo.Devolucion, dbo.Detalle_Dev, dbo.Estado_Dev, dbo.Motivo_Dev, dbo.Venta, dbo.Detalle_Venta, dbo.Producto,
+ * dbo.Nota_Credito, dbo.Reembolso_Devolucion.
  */
 
 export interface ReturnSummaryItem {
@@ -26,6 +27,11 @@ export interface ReturnSummaryItem {
     cantidadDev: number;
     motivo: string;
   }>;
+  // Campos de Notas de Crédito y Reembolsos vinculados
+  tieneNotaCredito?: boolean;
+  numeroNotaCredito?: string | null;
+  montoReembolsado?: number;
+  metodoReembolso?: string | null;
 }
 
 export interface ReturnSaleLineTrace {
@@ -48,6 +54,37 @@ export interface ReturnSaleLineTrace {
   diasRestantesGarantia: number;
 }
 
+export interface CreditNote {
+  idNotaCredito: number;
+  numeroNota: string;
+  idVenta: number;
+  idDevolucion: number | null;
+  fechaEmision: string;
+  tipoAjuste: "PARCIAL" | "TOTAL";
+  motivo: string;
+  montoSubtotal: number;
+  montoIgv: number;
+  montoTotal: number;
+  idEmpleado: number;
+  nombreEmpleado?: string;
+  estado: string;
+  esSimulacionAcademica: boolean;
+}
+
+export interface Refund {
+  idReembolso: number;
+  idDevolucion: number;
+  idVenta: number;
+  idMetodo: number;
+  nombreMetodo: string;
+  monto: number;
+  fechaHora: string;
+  idEmpleado: number;
+  idSesion: number | null;
+  referencia: string | null;
+  afectaEfectivo: boolean;
+}
+
 export interface ReturnDetail {
   idDevolucion: number;
   fechaDev: string;
@@ -67,6 +104,9 @@ export interface ReturnDetail {
   todasLasLineasVenta: ReturnSaleLineTrace[];
   totalUnidadesDevueltas: number;
   montoEstimadoDevuelto: number;
+  montoConservado: number;
+  notaCredito?: CreditNote | null;
+  reembolso?: Refund | null;
 }
 
 export interface ReturnKpiMetrics {
@@ -77,11 +117,14 @@ export interface ReturnKpiMetrics {
   totalUnidadesDevueltas: number;
   productosInvolucradosCount: number;
   montoTotalDevueltoEstimado: number;
+  totalNotasCreditoEmitidas?: number;
+  montoTotalReembolsado?: number;
 }
 
 export interface ReturnFilterMetadata {
   estados: Array<{ id: number; nombre: string }>;
   motivos: Array<{ id: number; descripcion: string }>;
+  metodosPago: Array<{ id: number; nombre: string }>;
 }
 
 export interface ReturnsPageData {
@@ -91,13 +134,13 @@ export interface ReturnsPageData {
 }
 
 // ==========================================
-// TIPOS TRANSACCIONALES PARA FASE 7B
+// TIPOS TRANSACCIONALES PARA FASE 7B Y NOTAS DE CRÉDITO
 // ==========================================
 
 export interface CreateReturnItemInput {
-  idDetalle: number; // Detalle_Venta.ID_detalle
-  cantidadDev: number; // Cantidad positiva > 0
-  idMotivo: number; // Motivo_Dev.ID_motivo (1, 2, 3)
+  idDetalle: number;
+  cantidadDev: number;
+  idMotivo: number;
 }
 
 export interface CreateReturnInput {
@@ -109,8 +152,14 @@ export interface CreateReturnInput {
 export interface ApproveReturnInput {
   idDevolucion: number;
   idEmpleado?: number;
-  reingresoStock?: boolean; // Solo permitido y evaluado si el motivo es "Producto equivocado"
+  reingresoStock?: boolean;
   observaciones?: string;
+  // Campos de Reembolso y Nota de Crédito
+  idMetodoReembolso?: number; // 1=Efectivo, 2=Tarjeta, 3=Transferencia, 4=Yape
+  referenciaReembolso?: string;
+  emitirNotaCredito?: boolean;
+  motivoNotaCredito?: string;
+  idSesionCaja?: number;
 }
 
 export interface RejectReturnInput {
@@ -146,6 +195,11 @@ export interface SaleForReturnSearch {
   idEmpleado: number;
   nombreEmpleado: string;
   lineas: SaleLineWithBalance[];
+  pagosOriginales?: Array<{
+    idMetodo: number;
+    nombreMetodo: string;
+    monto: number;
+  }>;
 }
 
 export interface TransactionalReturnResult {
@@ -160,4 +214,70 @@ export interface TransactionalReturnResult {
   montoEstimado: number;
   reingresoKardexRealizado?: boolean;
   unidadesReingresadas?: number;
+  notaCredito?: {
+    idNotaCredito: number;
+    numeroNota: string;
+    montoTotal: number;
+    montoSubtotal: number;
+    montoIgv: number;
+  };
+  reembolso?: {
+    idReembolso: number;
+    metodo: string;
+    monto: number;
+    afectaEfectivo: boolean;
+  };
+}
+
+export interface ReturnReceiptData {
+  titulo: string;
+  subtitulo: string;
+  empresa: {
+    nombre: string;
+    ruc: string;
+    direccion: string;
+    telefono?: string;
+  };
+  numeroDevolucion: string;
+  fechaHora: string;
+  idVenta: number;
+  numeroComprobanteOriginal: string;
+  fechaVentaOriginal: string;
+  cliente: {
+    dni: string;
+    nombre: string;
+  };
+  responsable: {
+    idEmpleado: number;
+    nombre: string;
+  };
+  productos: Array<{
+    codbarras: string;
+    nombre: string;
+    cantidadDevuelta: number;
+    precioUnitario: number;
+    subtotal: number;
+    motivo: string;
+  }>;
+  resumenFinanciero: {
+    subtotalDevuelto: number;
+    igvDevuelto: number;
+    totalDevuelto: number;
+    totalVentaOriginal: number;
+    montoConservado: number;
+  };
+  reembolso: {
+    metodo: string;
+    monto: number;
+    estado: string;
+    afectaCajaFisica: boolean;
+  };
+  notaCredito?: {
+    numeroNota: string;
+    fechaEmision: string;
+    tipoAjuste: string;
+    baseImponible: number;
+    igv: number;
+    total: number;
+  } | null;
 }

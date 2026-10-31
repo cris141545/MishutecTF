@@ -22,6 +22,11 @@ export const approveReturnSchema = z.object({
   idEmpleado: z.number().int().positive().optional(),
   reingresoStock: z.boolean().optional(),
   observaciones: z.string().max(250).optional(),
+  idMetodoReembolso: z.number().int().positive().optional(),
+  referenciaReembolso: z.string().max(100).optional(),
+  emitirNotaCredito: z.boolean().optional(),
+  motivoNotaCredito: z.string().max(200).optional(),
+  idSesionCaja: z.number().int().positive().optional(),
 });
 
 export const rejectReturnSchema = z.object({

@@ -20,12 +20,14 @@ import {
   Server,
 } from "lucide-react";
 import Link from "next/link";
+import { getSession } from "@/lib/auth/session";
 
 // Exclusivamente ejecución en Node.js runtime
 export const runtime = "nodejs";
 
 export default async function DashboardPage() {
   const data = await getDashboardData(5);
+  const session = await getSession();
   const { kpis, salesTimeline, categories, recentSales, lowStockProducts, recentMovements, serverInfo } = data;
 
   return (
@@ -59,7 +61,7 @@ export default async function DashboardPage() {
         <div className="flex items-center gap-2 self-start md:self-auto">
           <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-xs text-slate-600 shadow-xs">
             <Server className="h-3.5 w-3.5 text-blue-600" />
-            <span className="text-slate-700 font-medium">Instancia Local</span>
+            <span className="text-slate-700 font-medium">Base compartida</span>
           </div>
 
           <Link
@@ -164,10 +166,10 @@ export default async function DashboardPage() {
           </div>
           <div className="mt-2.5">
             <div className="text-xs font-semibold text-slate-800">
-              Operador Local
+              {session?.username ?? "Usuario"}
             </div>
             <p className="text-[10px] sm:text-[11px] text-slate-500 mt-0.5 truncate">
-              Windows Integrated Auth
+              Cuenta Mishutec
             </p>
           </div>
           <div className="mt-3 pt-2.5 border-t border-slate-100 text-[10px] text-slate-500 flex items-center justify-between">
@@ -175,7 +177,7 @@ export default async function DashboardPage() {
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
               Conectado
             </span>
-            <span className="text-[10px] text-slate-400 font-mono">SQL Express</span>
+            <span className="text-[10px] text-slate-400 font-mono">SQL Server</span>
           </div>
         </div>
       </div>

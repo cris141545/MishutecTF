@@ -1,4 +1,4 @@
-import sql from "mssql/msnodesqlv8";
+import sql from "mssql";
 import { getPool } from "../db";
 import {
   SaleListItem,
@@ -75,6 +75,7 @@ export async function getSalesData(filters: SalesFilterParams = {}): Promise<Sal
       v.Numero_comprobante AS numeroComprobante,
       CONVERT(VARCHAR(10), v.Fecha_venta, 120) AS fecha,
       v.Total_venta AS total,
+      ISNULL(v.Estado, 'COMPLETADA') AS estado,
       v.ID_tipo_comp AS idTipoComp,
       tc.Nombre_tipo AS tipoComprobante,
       v.Dni_cliente AS dniCliente,
@@ -177,9 +178,18 @@ export async function getSalesData(filters: SalesFilterParams = {}): Promise<Sal
   const sets = metaResult.recordsets as any[];
   const metadata: SalesFilterMetadata = {
     clientes: sets[0] || [],
-    empleados: sets[1] || [],
-    tiposComprobante: sets[2] || [],
-    metodosPago: sets[3] || [],
+    empleados: (sets[1] || []).map((e: any) => ({
+      id: Number(e.id),
+      nombreCompleto: String(e.nombreCompleto),
+    })),
+    tiposComprobante: (sets[2] || []).map((t: any) => ({
+      id: Number(t.id),
+      nombre: String(t.nombre),
+    })),
+    metodosPago: (sets[3] || []).map((m: any) => ({
+      id: Number(m.id),
+      nombre: String(m.nombre),
+    })),
   };
 
   return {
@@ -205,6 +215,9 @@ export async function getSaleDetailById(idVenta: number): Promise<SaleDetail | n
         v.Numero_comprobante AS numeroComprobante,
         CONVERT(VARCHAR(10), v.Fecha_venta, 120) AS fecha,
         v.Total_venta AS total,
+        ISNULL(v.Estado, 'COMPLETADA') AS estado,
+        v.Efectivo_recibido AS efectivoRecibido,
+        v.Vuelto AS vuelto,
         v.ID_tipo_comp AS idTipoComp,
         tc.Nombre_tipo AS tipoComprobante,
         v.Dni_cliente AS dniCliente,
@@ -290,6 +303,9 @@ export async function getSaleDetailById(idVenta: number): Promise<SaleDetail | n
     numeroComprobante: header.numeroComprobante,
     fecha: header.fecha,
     total,
+    estado: header.estado,
+    efectivoRecibido: header.efectivoRecibido != null ? Number(header.efectivoRecibido) : null,
+    vuelto: header.vuelto != null ? Number(header.vuelto) : null,
     idTipoComp: Number(header.idTipoComp),
     tipoComprobante: header.tipoComprobante,
     dniCliente: header.dniCliente,

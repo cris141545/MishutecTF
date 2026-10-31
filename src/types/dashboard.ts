@@ -72,7 +72,7 @@ export interface DashboardData {
   recentMovements: InventoryMovement[];
   serverInfo: {
     activeDatabase: string;
-    windowsUser: string;
+    databaseUser: string;
     sqlVersion: string;
     queriedAt: string;
   };

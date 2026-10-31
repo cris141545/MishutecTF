@@ -117,10 +117,10 @@ async function runSecurityCertification() {
       params: Promise.resolve({ barcode: "INEXISTENTE999" }),
     });
     const resJson = await res.json();
-    assert("API responde con HTTP 404 para producto inexistente", res.status === 404);
+    assert("API responde con HTTP 401 cuando no hay sesión", res.status === 401);
     assert(
-      "Mensaje de error neutro sin fugar tecnología ni nombre de BD",
-      resJson.error === "Producto con código 'INEXISTENTE999' no encontrado en el catálogo"
+      "Mensaje de acceso denegado neutro",
+      resJson.error === "Se requiere iniciar sesión."
     );
 
     // -------------------------------------------------------------------------
@@ -187,9 +187,10 @@ async function runSecurityCertification() {
       "/empleados",
       "/devoluciones",
       "/reportes",
+      "/usuarios",
     ];
     const protectsAll = expectedProtectedPaths.every((p) => matchers.some((m) => m.startsWith(p)));
-    assert("Proxy matcher cubre las 9 rutas comerciales reales del sistema", protectsAll);
+    assert("Proxy matcher cubre las rutas protegidas del sistema", protectsAll);
 
     // Simulación de navegación anónima a /dashboard -> Redirección a /login?from=%2Fdashboard
     const unauthReq = new NextRequest("http://localhost:3000/dashboard");
@@ -210,11 +211,18 @@ async function runSecurityCertification() {
 
     // Simulación con token JWT administrativo válido
     const secretKey = new TextEncoder().encode(process.env.AUTH_SESSION_SECRET || "mishutec_super_secret_admin_key_32chars!");
-    const validToken = await new SignJWT({ username: "admin", role: "admin" })
+    const validToken = await new SignJWT({ username: "admin", userId: null, role: "admin" })
       .setProtectedHeader({ alg: "HS256" })
       .setIssuedAt()
       .setExpirationTime("1h")
       .sign(secretKey);
+    const verifiedSession = await verifySessionToken(validToken);
+    assert(
+      "JWT administrativo incluye la identidad requerida por las sesiones individuales",
+      verifiedSession?.username === "admin" &&
+        verifiedSession.userId === null &&
+        verifiedSession.role === "admin"
+    );
 
     const validReq = new NextRequest("http://localhost:3000/ventas", {
       headers: { cookie: `${SESSION_COOKIE_NAME}=${validToken}` },

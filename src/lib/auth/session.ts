@@ -1,12 +1,13 @@
 import { cookies } from "next/headers";
 import { SignJWT, jwtVerify } from "jose";
 
-export const SESSION_COOKIE_NAME = "mishutec_session";
+export const SESSION_COOKIE_NAME = "mishutec_session_v2";
 const SESSION_DURATION_SECONDS = 8 * 60 * 60; // 8 horas
 
 export interface SessionPayload {
   username: string;
-  role: "admin";
+  userId: number | null;
+  role: "admin" | "user";
   issuedAt: number;
 }
 
@@ -18,7 +19,7 @@ export class UnauthorizedError extends Error {
 }
 
 export class AuthConfigurationError extends Error {
-  constructor(message = "Autenticación administrativa no configurada en variables de entorno") {
+  constructor(message = "Autenticación no configurada en las variables de entorno") {
     super(message);
     this.name = "AuthConfigurationError";
   }
@@ -28,18 +29,20 @@ function getSecretKey(): Uint8Array {
   const secret = process.env.AUTH_SESSION_SECRET;
   if (!secret || secret.length < 32) {
     throw new AuthConfigurationError(
-      "AUTH_SESSION_SECRET no configurada o menor a 32 caracteres en .env.local"
+      "AUTH_SESSION_SECRET no está configurada o tiene menos de 32 caracteres."
     );
   }
   return new TextEncoder().encode(secret);
 }
 
 /**
- * Crea y firma un JWT de sesión para el usuario administrativo.
+ * Crea y firma un JWT de sesión para el usuario autenticado.
  */
-export async function createSession(username: string): Promise<string> {
+export async function createSession(
+  user: Pick<SessionPayload, "username" | "userId" | "role">
+): Promise<string> {
   const secretKey = getSecretKey();
-  const token = await new SignJWT({ username, role: "admin" })
+  const token = await new SignJWT(user)
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime(`${SESSION_DURATION_SECONDS}s`)
@@ -66,13 +69,23 @@ export async function verifySessionToken(token: string): Promise<SessionPayload 
     if (!token) return null;
     const secretKey = getSecretKey();
     const { payload } = await jwtVerify(token, secretKey);
+    const userId = payload.userId;
+    if (
+      typeof payload.username !== "string" ||
+      (payload.role !== "admin" && payload.role !== "user") ||
+      (userId !== null &&
+        (typeof userId !== "number" || !Number.isSafeInteger(userId) || userId <= 0))
+    ) {
+      return null;
+    }
 
     return {
-      username: String(payload.username),
-      role: "admin",
+      username: payload.username,
+      userId,
+      role: payload.role,
       issuedAt: Number(payload.iat),
     };
-  } catch (error) {
+  } catch {
     return null;
   }
 }
@@ -87,7 +100,7 @@ export async function getSession(): Promise<SessionPayload | null> {
     if (!token) return null;
 
     return await verifySessionToken(token);
-  } catch (error) {
+  } catch {
     // Si el token es inválido o expiró, retornamos null
     return null;
   }
@@ -99,27 +112,4 @@ export async function getSession(): Promise<SessionPayload | null> {
 export async function destroySession(): Promise<void> {
   const cookieStore = await cookies();
   cookieStore.delete(SESSION_COOKIE_NAME);
-}
-
-/**
- * Guardián de autorización para Server Actions y Route Handlers.
- * Lanza UnauthorizedError si no existe una sesión válida.
- */
-export async function requireAdminSession(): Promise<SessionPayload> {
-  // 1. Verificar si la autenticación está configurada
-  if (!process.env.ADMIN_PASSWORD_HASH || !process.env.AUTH_SESSION_SECRET) {
-    throw new AuthConfigurationError(
-      "El sistema no tiene configuradas las credenciales de administración en .env.local. Acceso denegado por defecto."
-    );
-  }
-
-  // 2. Verificar la sesión del usuario
-  const session = await getSession();
-  if (!session) {
-    throw new UnauthorizedError(
-      "Operación rechazada: Requiere sesión administrativa activa."
-    );
-  }
-
-  return session;
 }

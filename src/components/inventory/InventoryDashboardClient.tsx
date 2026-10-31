@@ -11,7 +11,7 @@ import {
 import { InventoryKpiCards } from "./InventoryKpiCards";
 import { InventoryProductTable } from "./InventoryProductTable";
 import { InventoryKardexTable } from "./InventoryKardexTable";
-import { InventoryEntryModal } from "./InventoryEntryModal";
+import { InventoryPurchaseModal } from "./InventoryPurchaseModal";
 import { InventoryExitModal } from "./InventoryExitModal";
 import { InventoryAdjustmentsNotice } from "./InventoryAdjustmentsNotice";
 import { LoginModal } from "@/components/auth/LoginModal";
@@ -32,6 +32,11 @@ interface InventoryDashboardClientProps {
   products: InventoryProductStockItem[];
   kardex: KardexMovementItem[];
   metadata: InventoryFilterMetadata;
+  suppliers: Array<{ id: number; nombre: string }>;
+  employees: Array<{ id: number; nombre: string }>;
+  paymentMethods: Array<{ id: number; nombre: string }>;
+  idSesion: number | null;
+  efectivoDisponible: number;
   isAuthenticated: boolean;
   username: string | null;
 }
@@ -41,6 +46,11 @@ export function InventoryDashboardClient({
   products,
   kardex,
   metadata,
+  suppliers,
+  employees,
+  paymentMethods,
+  idSesion,
+  efectivoDisponible,
   isAuthenticated,
   username,
 }: InventoryDashboardClientProps) {
@@ -56,7 +66,7 @@ export function InventoryDashboardClient({
     initialTab === "kardex" ? "kardex" : initialTab === "politicas" ? "politicas" : "existencias"
   );
 
-  const [isEntryOpen, setIsEntryOpen] = useState(modalParam === "entrada");
+  const [isPurchaseOpen, setIsPurchaseOpen] = useState(modalParam === "entrada" || modalParam === "compra");
   const [isExitOpen, setIsExitOpen] = useState(modalParam === "salida");
   const [isLoginOpen, setIsLoginOpen] = useState(modalParam === "login");
   const [selectedProductForAction, setSelectedProductForAction] =
@@ -76,10 +86,10 @@ export function InventoryDashboardClient({
     }, 6000);
   };
 
-  // Abrir entrada para producto específico
+  // Registrar la compra del producto seleccionado desde existencias.
   const handleOpenEntry = (product: InventoryProductStockItem) => {
     setSelectedProductForAction(product);
-    setIsEntryOpen(true);
+    setIsPurchaseOpen(true);
   };
 
   // Abrir salida para producto específico
@@ -164,13 +174,13 @@ export function InventoryDashboardClient({
                 setIsLoginOpen(true);
               } else {
                 setSelectedProductForAction(null);
-                setIsEntryOpen(true);
+                setIsPurchaseOpen(true);
               }
             }}
             className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 min-h-[42px] rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-700 text-white font-semibold text-xs shadow-xs whitespace-nowrap transition-colors"
           >
             <ArrowDownRight className="h-4 w-4 shrink-0" />
-            <span>+ Registrar Entrada</span>
+            <span>+ Registrar Compra</span>
           </button>
 
           <button
@@ -255,21 +265,24 @@ export function InventoryDashboardClient({
 
       {activeTab === "politicas" && <InventoryAdjustmentsNotice />}
 
-      {/* Modal de Entrada de Inventario */}
-      <InventoryEntryModal
-        isOpen={isEntryOpen}
+      <InventoryPurchaseModal
+        isOpen={isPurchaseOpen}
         onClose={() => {
-          setIsEntryOpen(false);
+          setIsPurchaseOpen(false);
           setSelectedProductForAction(null);
         }}
-        metadata={metadata}
-        initialProduct={selectedProductForAction}
-        isAuthenticated={isAuthenticated}
-        onRequireAuth={() => setIsLoginOpen(true)}
+        initialProductBarcode={selectedProductForAction?.codbarras}
+        suppliers={suppliers}
+        employees={employees}
+        paymentMethods={paymentMethods}
+        idSesion={idSesion}
+        efectivoDisponible={efectivoDisponible}
         onSuccess={(msg) => {
           showFeedback("success", msg);
           router.refresh();
         }}
+        onRequireAuth={() => setIsLoginOpen(true)}
+        isAuthenticated={isAuthenticated}
       />
 
       {/* Modal de Salida de Inventario */}

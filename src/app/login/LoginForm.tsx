@@ -29,7 +29,7 @@ export function LoginForm({ fromUrl }: LoginFormProps) {
       <div className="flex items-center gap-2 pb-2 border-b border-slate-200">
         <Lock className="h-4 w-4 text-blue-600" />
         <span className="text-xs font-semibold text-slate-700">
-          Autenticación Administrativa Requerida
+          Acceso de usuario requerido
         </span>
       </div>
 
@@ -43,15 +43,14 @@ export function LoginForm({ fromUrl }: LoginFormProps) {
       <div className="space-y-1.5">
         <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
           <User className="h-3.5 w-3.5 text-slate-500" />
-          Usuario Administrador
+          Usuario
         </label>
         <input
           name="username"
           type="text"
           required
-          defaultValue="admin"
           className="w-full h-10 px-3.5 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:bg-white focus:ring-1 focus:ring-blue-500 transition-colors"
-          placeholder="admin"
+          placeholder="Tu usuario"
         />
       </div>
 

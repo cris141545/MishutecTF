@@ -8,6 +8,8 @@ import { UnauthorizedError } from "@/lib/auth/session";
 import {
   getCompleteReportsPageData,
   getReportKpis,
+  getFinancialAnalytics,
+  getTaxSummarySunat,
   getSalesByDate,
   getTopSellingProducts,
   getCustomerAnalytics,
@@ -23,7 +25,9 @@ export type ReportCsvType =
   | "inventario"
   | "clientes"
   | "proveedores"
-  | "devoluciones";
+  | "devoluciones"
+  | "finanzas"
+  | "tributario";
 
 /**
  * Normaliza y resuelve los filtros de fecha según los presets rápidos.
@@ -280,6 +284,46 @@ export async function generateReportCsv(
       for (const p of ret.productosMasDevueltos) {
         rows.push([p.nombreProd, p.codbarras, p.vecesDevuelto, p.unidadesDevueltas, p.impactoValorVenta.toFixed(2)].map(sanitizeCsvCell).join(","));
       }
+      break;
+    }
+
+    case "finanzas": {
+      const f = await getFinancialAnalytics(resolved);
+      rows.push(["MÉTRICA FINANCIERA", "MONTO (PEN / %)"].map(sanitizeCsvCell).join(","));
+      rows.push(["Ventas Brutas", `S/ ${f.ventasBrutas.toFixed(2)}`].map(sanitizeCsvCell).join(","));
+      rows.push(["Devoluciones y Reembolsos", `- S/ ${f.devolucionesMonto.toFixed(2)}`].map(sanitizeCsvCell).join(","));
+      rows.push(["Ventas Netas (con IGV)", `S/ ${f.ventasNetasTotal.toFixed(2)}`].map(sanitizeCsvCell).join(","));
+      rows.push(["Ventas Netas (sin impuestos)", `S/ ${f.ventasNetasSinImpuestos.toFixed(2)}`].map(sanitizeCsvCell).join(","));
+      rows.push(["Costo de Ventas (COGS - Suministra)", `- S/ ${f.costoVentas.toFixed(2)}`].map(sanitizeCsvCell).join(","));
+      rows.push(["Ganancia Bruta", `S/ ${f.gananciaBruta.toFixed(2)}`].map(sanitizeCsvCell).join(","));
+      rows.push(["Margen Bruto %", `${f.margenBrutoPorcentaje.toFixed(2)}%`].map(sanitizeCsvCell).join(","));
+      rows.push(["Gastos Operativos (Caja)", `- S/ ${f.gastosOperativos.toFixed(2)}`].map(sanitizeCsvCell).join(","));
+      rows.push(["Utilidad Operativa Estimada", `S/ ${f.utilidadOperativa.toFixed(2)}`].map(sanitizeCsvCell).join(","));
+      rows.push(["Margen Operativo Neto %", `${f.margenNetoPorcentaje.toFixed(2)}%`].map(sanitizeCsvCell).join(","));
+      rows.push(["Flujo Neto de Efectivo en Caja", `S/ ${f.flujoEfectivoNeto.toFixed(2)}`].map(sanitizeCsvCell).join(","));
+      break;
+    }
+
+    case "tributario": {
+      const t = await getTaxSummarySunat(resolved);
+      rows.push(["CAMPO DECLARACIÓN REFERENCIAL SUNAT", "VALOR"].map(sanitizeCsvCell).join(","));
+      rows.push(["RUC", t.ruc].map(sanitizeCsvCell).join(","));
+      rows.push(["Razón Social", t.razonSocial].map(sanitizeCsvCell).join(","));
+      rows.push(["Régimen Tributario", t.regimenTributario].map(sanitizeCsvCell).join(","));
+      rows.push(["Período Fiscal", t.periodoFiscal].map(sanitizeCsvCell).join(","));
+      rows.push(["Ventas Gravadas Totales", `S/ ${t.ventasGravadasTotal.toFixed(2)}`].map(sanitizeCsvCell).join(","));
+      rows.push(["Base Imponible Ventas", `S/ ${t.baseImponibleVentas.toFixed(2)}`].map(sanitizeCsvCell).join(","));
+      rows.push(["Débito Fiscal Bruto (18%)", `S/ ${t.debitoFiscalIgvTotal.toFixed(2)}`].map(sanitizeCsvCell).join(","));
+      rows.push(["Desglose IGV (15.5%)", `S/ ${t.desgloseIgv.toFixed(2)}`].map(sanitizeCsvCell).join(","));
+      rows.push(["Desglose IPM (2.5%)", `S/ ${t.desgloseIpm.toFixed(2)}`].map(sanitizeCsvCell).join(","));
+      rows.push(["Ajustes por Notas de Crédito", `- S/ ${t.ajustesNotasCredito.toFixed(2)}`].map(sanitizeCsvCell).join(","));
+      rows.push(["Débito Fiscal Neto", `S/ ${t.debitoFiscalNeto.toFixed(2)}`].map(sanitizeCsvCell).join(","));
+      rows.push(["Compras Registradas (Suministra)", `S/ ${t.comprasRegistradasTotal.toFixed(2)}`].map(sanitizeCsvCell).join(","));
+      rows.push(["Base Imponible Compras", `S/ ${t.baseImponibleCompras.toFixed(2)}`].map(sanitizeCsvCell).join(","));
+      rows.push(["Crédito Fiscal Sustentado (18%)", `S/ ${t.creditoFiscalSustentado.toFixed(2)}`].map(sanitizeCsvCell).join(","));
+      rows.push(["Saldo Referencial IGV a Pagar/Favor", `S/ ${t.saldoReferencialIgvMes.toFixed(2)}`].map(sanitizeCsvCell).join(","));
+      rows.push(["Pago a Cuenta Renta (1.0% MYPE)", `S/ ${t.pagoCuentaRentaEstimado.toFixed(2)}`].map(sanitizeCsvCell).join(","));
+      rows.push(["Nota Legal", t.advertenciaLegal].map(sanitizeCsvCell).join(","));
       break;
     }
   }

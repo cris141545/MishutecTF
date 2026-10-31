@@ -8,6 +8,7 @@ import {
   SalesFilterMetadata,
 } from "@/types/sales";
 import { formatCurrency, formatNumber } from "@/lib/formatters";
+import { calculateTaxFromTotal } from "@/lib/tax";
 import { createSaleAction } from "@/lib/actions/sale.actions";
 import { TransactionalSaleResult } from "@/lib/repositories/sale-transaction.repository";
 import { PosReceiptModal } from "./PosReceiptModal";
@@ -57,9 +58,10 @@ export function PosTerminalClient({
   const [selectedClientDni, setSelectedClientDni] = useState(
     metadata.clientes[0]?.dni || ""
   );
-  const [selectedEmployeeId, setSelectedEmployeeId] = useState<number>(
-    metadata.empleados[0]?.id || 1
-  );
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState<number>(() => {
+    const firstEmp = metadata.empleados[0]?.id;
+    return firstEmp !== undefined ? Number(firstEmp) : 1;
+  });
   const [selectedTipoCompId, setSelectedTipoCompId] = useState<1 | 2>(1); // 1 = Boleta, 2 = Factura
 
   // Pagos múltiples
@@ -110,7 +112,73 @@ export function PosTerminalClient({
     return cart.reduce((acc, item) => acc + item.cantidad, 0);
   }, [cart]);
 
-  // Total de pagos asignados
+  // Cálculo de pagos con soporte de vuelto y pagos mixtos
+  const paymentCalculations = useMemo(() => {
+    const totalNoEfectivo = payments
+      .filter((p) => p.idMetodo !== 1)
+      .reduce((acc, p) => acc + (p.monto || 0), 0);
+
+    const efectivoRow = payments.find((p) => p.idMetodo === 1);
+    const efectivoIngresado = efectivoRow ? (efectivoRow.monto || 0) : 0;
+    const tieneEfectivo = !!efectivoRow;
+
+    // Restante que debe ser cubierto por efectivo (redondeo exacto a 2 decimales)
+    const restanteEfectivo = Math.max(0, Math.round((totalGeneral - totalNoEfectivo) * 100) / 100);
+
+    let vuelto = 0;
+    let efectivoNeto = 0;
+    let faltante = 0;
+    let esValido = false;
+
+    if (tieneEfectivo) {
+      if (efectivoIngresado >= restanteEfectivo && totalGeneral > 0) {
+        vuelto = Math.round((efectivoIngresado - restanteEfectivo) * 100) / 100;
+        efectivoNeto = restanteEfectivo;
+        faltante = 0;
+        esValido = true;
+      } else {
+        vuelto = 0;
+        efectivoNeto = efectivoIngresado;
+        faltante = Math.round((restanteEfectivo - efectivoIngresado) * 100) / 100;
+        esValido = false;
+      }
+    } else {
+      // Sin efectivo (100% digital/electrónico)
+      const diff = Math.round((totalGeneral - totalNoEfectivo) * 100) / 100;
+      if (Math.abs(diff) < 0.01 && totalGeneral > 0) {
+        esValido = true;
+        faltante = 0;
+      } else if (diff > 0) {
+        faltante = diff;
+        esValido = false;
+      } else {
+        // Exceso en medio electrónico no permitido
+        faltante = diff;
+        esValido = false;
+      }
+    }
+
+    const totalCobradoNeto = totalNoEfectivo + efectivoNeto;
+
+    return {
+      totalNoEfectivo,
+      efectivoIngresado,
+      tieneEfectivo,
+      restanteEfectivo,
+      vuelto,
+      efectivoNeto,
+      faltante,
+      esValido,
+      totalCobradoNeto,
+    };
+  }, [payments, totalGeneral]);
+
+  // Desglose Tributario Oficial Perú 2026 (15.5% IGV + 2.5% IPM = 18.0% total)
+  const taxBreakdown = useMemo(() => {
+    return calculateTaxFromTotal(totalGeneral);
+  }, [totalGeneral]);
+
+  // Total de pagos brutos asignados en inputs
   const totalPagado = useMemo(() => {
     return payments.reduce((acc, p) => acc + (p.monto || 0), 0);
   }, [payments]);
@@ -246,10 +314,16 @@ export function PosTerminalClient({
       return;
     }
 
-    if (Math.abs(diferenciaPagos) >= 0.01) {
-      setSubmitError(
-        `Los pagos asignados (${formatCurrency(totalPagado)}) no coinciden exactamente con el total (${formatCurrency(totalGeneral)}).`
-      );
+    if (!paymentCalculations.esValido) {
+      if (paymentCalculations.tieneEfectivo && paymentCalculations.faltante > 0) {
+        setSubmitError(
+          `El importe recibido no cubre el total de la compra (Faltan ${formatCurrency(paymentCalculations.faltante)}).`
+        );
+      } else if (!paymentCalculations.tieneEfectivo && paymentCalculations.faltante < 0) {
+        setSubmitError("Los pagos con medios electrónicos no pueden superar el total de la orden.");
+      } else {
+        setSubmitError("Los pagos asignados no cubren el total de la compra.");
+      }
       return;
     }
 
@@ -257,18 +331,29 @@ export function PosTerminalClient({
       setIsSubmitting(true);
       setSubmitError(null);
 
+      // Normalización estricta del payload hacia el Server Action
       const payload = {
-        dniCliente: selectedClientDni,
-        idEmpleado: selectedEmployeeId,
-        idTipoComp: selectedTipoCompId,
+        dniCliente: String(selectedClientDni).trim(),
+        idEmpleado: Number(selectedEmployeeId),
+        idTipoComp: Number(selectedTipoCompId) as 1 | 2,
         items: cart.map((item) => ({
-          codbarras: item.producto.codbarras,
-          cantidad: item.cantidad,
+          codbarras: String(item.producto.codbarras).trim(),
+          cantidad: Number(item.cantidad),
         })),
         payments: payments.map((p) => ({
-          idMetodo: p.idMetodo,
-          monto: p.monto,
+          idMetodo: Number(p.idMetodo),
+          // Si es efectivo y hubo exceso/vuelto, el cobro neto asignado a la venta es el saldo restante
+          monto:
+            Number(p.idMetodo) === 1
+              ? paymentCalculations.efectivoNeto
+              : Number(p.monto),
         })),
+        efectivoRecibido: paymentCalculations.tieneEfectivo
+          ? paymentCalculations.efectivoIngresado
+          : undefined,
+        vuelto: paymentCalculations.tieneEfectivo
+          ? paymentCalculations.vuelto
+          : undefined,
         clientRequestId: clientAttemptId,
       };
 
@@ -683,44 +768,94 @@ export function PosTerminalClient({
                   ))}
                 </div>
 
-                {/* Balance de Pagos */}
-                <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-between text-xs font-mono">
-                  <span className="text-slate-600">Total asignado a pagos:</span>
-                  <span
-                    className={`font-bold ${
-                      Math.abs(diferenciaPagos) < 0.01
-                        ? "text-emerald-700"
-                        : "text-amber-700"
-                    }`}
-                  >
-                    {formatCurrency(totalPagado)}
-                  </span>
-                </div>
-                {diferenciaPagos > 0.01 && (
-                  <p className="text-[11px] text-amber-700 flex items-center gap-1">
-                    <AlertTriangle className="h-3 w-3 shrink-0" />
-                    <span>Faltan asignar {formatCurrency(diferenciaPagos)} para cubrir la orden.</span>
-                  </p>
-                )}
-                {diferenciaPagos < -0.01 && (
-                  <p className="text-[11px] text-blue-700 flex items-center gap-1">
-                    <CheckCircle2 className="h-3 w-3 shrink-0" />
-                    <span>Exceso de pago (vuelto al cliente): {formatCurrency(Math.abs(diferenciaPagos))}</span>
-                  </p>
+                {/* Balance y Estado de Pagos con soporte de Vuelto */}
+                {paymentCalculations.tieneEfectivo ? (
+                  paymentCalculations.vuelto > 0 ? (
+                    <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200 space-y-1.5 font-mono text-xs">
+                      <div className="flex items-center justify-between text-emerald-800">
+                        <span className="flex items-center gap-1 font-medium">
+                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                          <span>Efectivo recibido:</span>
+                        </span>
+                        <span className="font-bold">{formatCurrency(paymentCalculations.efectivoIngresado)}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-emerald-900 font-bold text-sm pt-1 border-t border-emerald-200">
+                        <span>Vuelto al cliente:</span>
+                        <span className="text-emerald-700">{formatCurrency(paymentCalculations.vuelto)}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-slate-600 text-[11px] pt-0.5">
+                        <span>Cobro neto en efectivo:</span>
+                        <span className="font-semibold">{formatCurrency(paymentCalculations.efectivoNeto)}</span>
+                      </div>
+                    </div>
+                  ) : paymentCalculations.faltante > 0 ? (
+                    <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 flex items-center gap-1.5 text-xs">
+                      <AlertTriangle className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                      <span>El importe recibido no cubre el total de la compra (Faltan {formatCurrency(paymentCalculations.faltante)}).</span>
+                    </div>
+                  ) : (
+                    <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 flex items-center justify-between text-xs font-mono">
+                      <span className="flex items-center gap-1">
+                        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                        <span>Pago exacto en efectivo:</span>
+                      </span>
+                      <span className="font-bold text-emerald-700">{formatCurrency(paymentCalculations.efectivoIngresado)}</span>
+                    </div>
+                  )
+                ) : (
+                  paymentCalculations.esValido ? (
+                    <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 flex items-center justify-between text-xs font-mono">
+                      <span className="flex items-center gap-1">
+                        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                        <span>Total cubierto por medios digitales:</span>
+                      </span>
+                      <span className="font-bold text-emerald-700">{formatCurrency(paymentCalculations.totalNoEfectivo)}</span>
+                    </div>
+                  ) : paymentCalculations.faltante > 0 ? (
+                    <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 flex items-center gap-1.5 text-xs">
+                      <AlertTriangle className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                      <span>Faltan asignar {formatCurrency(paymentCalculations.faltante)} para cubrir la orden.</span>
+                    </div>
+                  ) : (
+                    <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 flex items-center gap-1.5 text-xs">
+                      <AlertCircle className="h-3.5 w-3.5 text-rose-600 shrink-0" />
+                      <span>Los pagos con medios electrónicos no pueden superar el total de la orden.</span>
+                    </div>
+                  )
                 )}
               </div>
             </div>
 
-            {/* Resumen Total y Botón de Confirmación Fase 6B */}
-            <div className="pt-3 border-t border-slate-100 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-semibold text-slate-700">
+            {/* Resumen Comercial y Desglose Tributario (15.5% IGV + 2.5% IPM) */}
+            <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-2">
+              <div className="space-y-1.5 text-xs font-mono">
+                <div className="flex justify-between text-slate-500 dark:text-slate-400">
+                  <span>Subtotal:</span>
+                  <span>{formatCurrency(totalGeneral)}</span>
+                </div>
+                <div className="flex justify-between text-slate-500 dark:text-slate-400">
+                  <span>Descuentos:</span>
+                  <span>{formatCurrency(0)}</span>
+                </div>
+                <div className="flex justify-between text-slate-600 dark:text-slate-300">
+                  <span>Base Imponible (Gravada):</span>
+                  <span className="font-semibold">{formatCurrency(taxBreakdown.baseImponible)}</span>
+                </div>
+                <div className="flex justify-between text-slate-600 dark:text-slate-300">
+                  <span>IGV (15.5%) + IPM (2.5%):</span>
+                  <span className="font-semibold">{formatCurrency(taxBreakdown.totalImpuestos)}</span>
+                </div>
+              </div>
+
+              <div className="pt-2 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                <span className="text-sm font-bold text-slate-800 dark:text-slate-100">
                   Total General a Pagar
                 </span>
-                <span className="text-xl sm:text-2xl font-bold font-mono text-slate-900">
+                <span className="text-xl sm:text-2xl font-bold font-mono text-blue-600 dark:text-blue-400">
                   {formatCurrency(totalGeneral)}
                 </span>
               </div>
+            </div>
 
               {submitError && (
                 <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-start gap-2.5">
@@ -739,7 +874,7 @@ export function PosTerminalClient({
                 </div>
               )}
 
-              {/* Botón de Confirmación Activo en Fase 6B */}
+              {/* Botón de Confirmación */}
               <div className="space-y-2">
                 <button
                   type="button"
@@ -750,7 +885,7 @@ export function PosTerminalClient({
                   disabled={
                     cart.length === 0 ||
                     totalGeneral <= 0 ||
-                    Math.abs(diferenciaPagos) >= 0.01 ||
+                    !paymentCalculations.esValido ||
                     !selectedClientDni ||
                     !selectedEmployeeId ||
                     isSubmitting
@@ -779,7 +914,6 @@ export function PosTerminalClient({
             </div>
           </div>
         </div>
-      </div>
 
       {/* Modal de Pre-Confirmación de Venta */}
       {showConfirmModal && (
@@ -872,32 +1006,78 @@ export function PosTerminalClient({
                 </div>
               </div>
 
-              {/* Desglose de Pagos */}
-              <div className="space-y-1.5">
-                <span className="text-[10px] uppercase font-bold text-slate-500 block">
-                  Métodos de Pago
+              {/* RESUMEN DE LA COMPRA Y LIQUIDACIÓN TRIBUTARIA */}
+              <div className="space-y-2.5 p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block tracking-wider">
+                  Resumen Comercial y Liquidación Tributaria
                 </span>
-                <div className="space-y-1">
-                  {payments.map((p) => (
-                    <div
-                      key={p.idMetodo}
-                      className="p-2 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-between text-xs"
-                    >
-                      <span className="text-slate-700 font-medium">{p.nombreMetodo}</span>
-                      <span className="font-mono font-bold text-emerald-700">
-                        {formatCurrency(p.monto)}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
+                <div className="space-y-1.5 font-mono text-xs">
+                  <div className="flex items-center justify-between text-slate-600 dark:text-slate-300">
+                    <span>Total de Productos:</span>
+                    <span className="font-semibold text-slate-800 dark:text-slate-100">
+                      {cart.length} ítems ({totalItemsCount} unid.)
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-slate-600 dark:text-slate-300">
+                    <span>Base Imponible (Gravada):</span>
+                    <span>{formatCurrency(taxBreakdown.baseImponible)}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-slate-600 dark:text-slate-300 text-[11px]">
+                    <span className="pl-2">&bull; IGV (15.5%):</span>
+                    <span>{formatCurrency(taxBreakdown.igv)}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-slate-600 dark:text-slate-300 text-[11px]">
+                    <span className="pl-2">&bull; IPM (2.5%):</span>
+                    <span>{formatCurrency(taxBreakdown.ipm)}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-slate-700 dark:text-slate-200 font-bold pt-1 border-t border-slate-200 dark:border-slate-800">
+                    <span>Total de la Operación:</span>
+                    <span className="text-blue-600 dark:text-blue-400 font-bold text-sm">{formatCurrency(totalGeneral)}</span>
+                  </div>
 
-              {/* Total Final */}
-              <div className="p-3 rounded-lg bg-blue-50/80 border border-blue-200 flex items-center justify-between">
-                <span className="font-bold text-slate-900 text-sm">Total Liquidado</span>
-                <span className="font-mono font-bold text-blue-600 text-lg sm:text-xl">
-                  {formatCurrency(totalGeneral)}
-                </span>
+                  {/* Métodos de Pago */}
+                  <div className="pt-2 border-t border-slate-200 space-y-1 text-[11px]">
+                    <span className="text-[10px] font-bold text-slate-500 block uppercase font-sans">
+                      Métodos de Pago:
+                    </span>
+                    {payments.map((p) => (
+                      <div key={p.idMetodo} className="flex justify-between text-slate-600">
+                        <span>{p.nombreMetodo}:</span>
+                        <span className="font-bold text-slate-800">
+                          {p.idMetodo === 1 && paymentCalculations.vuelto > 0
+                            ? `${formatCurrency(paymentCalculations.efectivoNeto)} (Recibido: ${formatCurrency(paymentCalculations.efectivoIngresado)})`
+                            : formatCurrency(p.monto)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Efectivo y Vuelto si aplica */}
+                  {paymentCalculations.tieneEfectivo && (
+                    <div className="pt-2 border-t border-slate-200 space-y-1 text-xs">
+                      <div className="flex items-center justify-between text-slate-700">
+                        <span>Efectivo Entregado:</span>
+                        <span className="font-bold text-slate-900">
+                          {formatCurrency(paymentCalculations.efectivoIngresado)}
+                        </span>
+                      </div>
+                      {paymentCalculations.vuelto > 0 && (
+                        <div className="flex items-center justify-between text-emerald-700 font-bold">
+                          <span>Vuelto al Cliente:</span>
+                          <span className="text-emerald-700 text-sm">{formatCurrency(paymentCalculations.vuelto)}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Cobro Neto */}
+                  <div className="pt-2.5 border-t-2 border-slate-300 flex items-center justify-between text-sm font-bold text-slate-900">
+                    <span className="uppercase tracking-wide">COBRO NETO:</span>
+                    <span className="font-mono text-blue-600 text-base sm:text-lg">
+                      {formatCurrency(totalGeneral)}
+                    </span>
+                  </div>
+                </div>
               </div>
 
               {submitError && (

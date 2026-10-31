@@ -8,8 +8,10 @@ import {
 } from "@/types/returns";
 import {
   searchSaleForReturnAction,
+  searchSaleCandidatesAction,
   createReturnAction,
 } from "@/lib/actions/return.actions";
+import { SaleCandidate } from "@/lib/repositories/return-transaction.repository";
 import { formatCurrency, formatDate } from "@/lib/formatters";
 import {
   X,
@@ -44,6 +46,7 @@ export function NewReturnModal({ onClose, onSuccess, motivos }: NewReturnModalPr
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [saleData, setSaleData] = useState<SaleForReturnSearch | null>(null);
+  const [candidates, setCandidates] = useState<SaleCandidate[]>([]);
 
   // Selección de ítems para devolución
   const [selectedItems, setSelectedItems] = useState<Map<number, SelectedItemState>>(new Map());
@@ -79,17 +82,25 @@ export function NewReturnModal({ onClose, onSuccess, motivos }: NewReturnModalPr
       setSearchError(null);
       setSubmitError(null);
       setSaleData(null);
+      setCandidates([]);
       setSelectedItems(new Map());
 
       const res = await searchSaleForReturnAction(term.trim());
 
-      if (!res.success || !res.data) {
-        setSearchError(res.error || "No se encontró ninguna venta con el código ingresado.");
+      if (res.success && res.data) {
+        setSaleData(res.data);
+        setSelectedEmployeeId(res.data.idEmpleado || 1);
         return;
       }
 
-      setSaleData(res.data);
-      setSelectedEmployeeId(res.data.idEmpleado || 1);
+      // Si no fue encontrado por comprobante directo, intentar búsqueda por coincidencia libre (DNI, cliente, fecha)
+      const candRes = await searchSaleCandidatesAction(term.trim());
+      if (candRes.success && candRes.data && candRes.data.length > 0) {
+        setCandidates(candRes.data);
+        return;
+      }
+
+      setSearchError(res.error || "No se encontró ninguna venta con el código ingresado.");
     } catch (err: any) {
       setSearchError(err.message || "Error al buscar la venta solicitada.");
     } finally {
@@ -274,6 +285,36 @@ export function NewReturnModal({ onClose, onSuccess, motivos }: NewReturnModalPr
                 )
               )}
             </div>
+
+            {candidates.length > 0 && (
+              <div className="p-3 rounded-lg bg-blue-50 border border-blue-200 text-xs space-y-2 mt-2">
+                <span className="font-semibold text-blue-900 block">
+                  Ventas encontradas para tu búsqueda ({candidates.length}):
+                </span>
+                <div className="flex flex-col gap-1.5 max-h-40 overflow-y-auto">
+                  {candidates.map((c) => (
+                    <button
+                      key={c.idVenta}
+                      type="button"
+                      onClick={() => {
+                        setSearchTerm(c.numeroComprobante);
+                        handleSearchSale(c.numeroComprobante);
+                      }}
+                      className="flex items-center justify-between p-2 rounded-lg bg-white border border-blue-100 hover:border-blue-300 text-left transition-colors"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold font-mono text-blue-700">{c.numeroComprobante}</span>
+                        <span className="text-slate-700">{c.nombreCliente} (DNI: {c.dniCliente})</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="text-slate-500">{c.fechaVenta}</span>
+                        <span className="font-bold text-slate-900">S/ {c.totalVenta.toFixed(2)}</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {searchError && (
               <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2">
@@ -507,21 +548,49 @@ export function NewReturnModal({ onClose, onSuccess, motivos }: NewReturnModalPr
               {/* 4. Resumen y Empleado Responsable */}
               {selectedCount > 0 && (
                 <div className="p-4 rounded-xl bg-blue-50/60 border border-blue-200 space-y-3 animate-in fade-in duration-150">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-blue-200/60 pb-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-blue-200/60 pb-3">
                     <div>
-                      <span className="text-xs font-semibold text-blue-900 uppercase tracking-wider">
-                        Resumen del Trámite RMA
-                      </span>
-                      <p className="text-xs text-slate-600">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-blue-900 uppercase tracking-wider">
+                          Resumen del Trámite RMA
+                        </span>
+                        <span
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                            estimatedAmount >= saleData.totalVenta - 0.01
+                              ? "bg-rose-100 text-rose-800 border border-rose-200"
+                              : "bg-blue-100 text-blue-800 border border-blue-200"
+                          }`}
+                        >
+                          {estimatedAmount >= saleData.totalVenta - 0.01
+                            ? "Devolución Total (Anulación de Comprobante)"
+                            : "Devolución Parcial (Ajuste de Comprobante)"}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-600 mt-1">
                         {selectedCount} producto(s) seleccionado(s) • Total unidades:{" "}
                         <strong className="text-slate-900">{totalUnits} unid.</strong>
                       </p>
                     </div>
-                    <div className="text-right">
-                      <span className="text-xs text-slate-500 block">Impacto Estimado</span>
-                      <span className="text-lg font-bold text-blue-700 font-mono">
-                        {formatCurrency(estimatedAmount)}
-                      </span>
+
+                    <div className="flex flex-wrap items-center gap-4 text-right">
+                      <div>
+                        <span className="text-[10px] text-slate-500 block">Venta Original</span>
+                        <span className="text-xs font-semibold text-slate-700 font-mono">
+                          {formatCurrency(saleData.totalVenta)}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-rose-600 block font-semibold">A Devolver</span>
+                        <span className="text-sm font-bold text-rose-700 font-mono">
+                          -{formatCurrency(estimatedAmount)}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-emerald-700 block font-semibold">Conservado</span>
+                        <span className="text-sm font-bold text-emerald-700 font-mono">
+                          {formatCurrency(Math.max(0, saleData.totalVenta - estimatedAmount))}
+                        </span>
+                      </div>
                     </div>
                   </div>
 

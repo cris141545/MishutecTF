@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProductDetailByBarcode } from "@/lib/services/product.service";
+import { requireAdminSession } from "@/lib/auth/authorization";
+import { UnauthorizedError } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 
@@ -8,6 +10,8 @@ export async function GET(
   { params }: { params: Promise<{ barcode: string }> }
 ) {
   try {
+    await requireAdminSession();
+
     const { barcode } = await params;
     const cleanBarcode = barcode ? decodeURIComponent(barcode).trim() : "";
 
@@ -47,7 +51,14 @@ export async function GET(
         },
       }
     );
-  } catch (error: any) {
+  } catch (error: unknown) {
+    if (error instanceof UnauthorizedError) {
+      return NextResponse.json(
+        { success: false, error: "Se requiere iniciar sesión." },
+        { status: 401 }
+      );
+    }
+
     console.error("[API Error] /api/products/[barcode]:", error);
     return NextResponse.json(
       {

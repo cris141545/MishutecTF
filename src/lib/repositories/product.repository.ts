@@ -1,5 +1,5 @@
 import { getPool } from "@/lib/db";
-import sql from "mssql/msnodesqlv8";
+import sql from "mssql";
 import {
   ProductListItem,
   ProductDetail,

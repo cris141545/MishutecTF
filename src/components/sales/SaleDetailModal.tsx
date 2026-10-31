@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { SaleDetail } from "@/types/sales";
 import { formatCurrency, formatDate } from "@/lib/formatters";
+import { calculateTaxFromTotal } from "@/lib/tax";
 import {
   X,
   FileText,
@@ -43,9 +44,9 @@ export function SaleDetailModal({ detail, loading, onClose }: SaleDetailModalPro
       aria-labelledby="sale-detail-title"
       className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in duration-200"
     >
-      <div className="relative w-full max-w-2xl max-h-[92vh] flex flex-col rounded-2xl bg-white border border-slate-200 shadow-2xl overflow-hidden text-slate-900">
+      <div className="relative w-full max-w-2xl max-h-[92vh] flex flex-col rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden text-slate-900 dark:text-slate-100">
         {/* Cabecera Fija */}
-        <div className="p-4 sm:p-5 border-b border-slate-200 flex items-center justify-between shrink-0 bg-slate-50/80">
+        <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0 bg-slate-50/80 dark:bg-slate-900/80">
           <div className="flex items-center gap-2.5 min-w-0">
             <div className="p-2 rounded-xl bg-blue-50 border border-blue-200 text-blue-600 shrink-0">
               <FileText className="h-5 w-5" />
@@ -214,6 +215,52 @@ export function SaleDetailModal({ detail, loading, onClose }: SaleDetailModalPro
                       </span>
                     </div>
                   ))}
+                </div>
+              </div>
+
+                {detail.efectivoRecibido != null && detail.efectivoRecibido > 0 && (
+                  <div className="mt-2.5 p-3 rounded-lg bg-emerald-50/60 border border-emerald-200/80 space-y-1 font-mono text-xs">
+                    <div className="flex justify-between text-slate-700">
+                      <span>Efectivo Entregado:</span>
+                      <span className="font-bold text-slate-900">{formatCurrency(detail.efectivoRecibido)}</span>
+                    </div>
+                    {detail.vuelto != null && detail.vuelto > 0 && (
+                      <div className="flex justify-between text-emerald-700 font-bold">
+                        <span>Vuelto al Cliente:</span>
+                        <span>{formatCurrency(detail.vuelto)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between text-slate-900 font-bold pt-1 border-t border-emerald-200">
+                      <span>Cobro Neto en Efectivo:</span>
+                      <span>{formatCurrency(detail.efectivoRecibido - (detail.vuelto || 0))}</span>
+                    </div>
+                  </div>
+                )}
+
+              {/* Desglose Tributario Oficial Perú 2026 */}
+              <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-1.5 font-mono text-xs">
+                <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block tracking-wider font-sans">
+                  Liquidación Tributaria (IGV 15.5% + IPM 2.5% = 18.0%)
+                </span>
+                <div className="flex justify-between text-slate-600 dark:text-slate-300">
+                  <span>Subtotal Bruto:</span>
+                  <span>{formatCurrency(detail.total)}</span>
+                </div>
+                <div className="flex justify-between text-slate-600 dark:text-slate-300">
+                  <span>Base Imponible (Gravada):</span>
+                  <span>{formatCurrency(calculateTaxFromTotal(detail.total).baseImponible)}</span>
+                </div>
+                <div className="flex justify-between text-slate-600 dark:text-slate-300 text-[11px] pl-2">
+                  <span>&bull; IGV (15.5%):</span>
+                  <span>{formatCurrency(calculateTaxFromTotal(detail.total).igv)}</span>
+                </div>
+                <div className="flex justify-between text-slate-600 dark:text-slate-300 text-[11px] pl-2">
+                  <span>&bull; IPM (2.5%):</span>
+                  <span>{formatCurrency(calculateTaxFromTotal(detail.total).ipm)}</span>
+                </div>
+                <div className="flex justify-between text-slate-900 dark:text-slate-100 font-bold border-t border-slate-200 dark:border-slate-800 pt-1">
+                  <span>Total Liquidado:</span>
+                  <span className="text-blue-600 dark:text-blue-400">{formatCurrency(detail.total)}</span>
                 </div>
               </div>
 

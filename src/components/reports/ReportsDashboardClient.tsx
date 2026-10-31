@@ -11,6 +11,8 @@ import { SalesAnalyticsTab } from "./SalesAnalyticsTab";
 import { InventoryAnalyticsTab } from "./InventoryAnalyticsTab";
 import { ReturnsAnalyticsTab } from "./ReturnsAnalyticsTab";
 import { SuppliersAnalyticsTab } from "./SuppliersAnalyticsTab";
+import { FinancialAnalyticsTab } from "./FinancialAnalyticsTab";
+import { TaxAnalyticsTab } from "./TaxAnalyticsTab";
 import {
   getFilteredReportsAction,
   exportReportCsvAction,
@@ -27,6 +29,7 @@ import {
   CheckCircle2,
   AlertCircle,
   FileSpreadsheet,
+  DollarSign,
 } from "lucide-react";
 
 interface ReportsDashboardClientProps {
@@ -36,7 +39,14 @@ interface ReportsDashboardClientProps {
   isAuthenticated: boolean;
 }
 
-type TabKey = "general" | "ventas" | "inventario" | "devoluciones" | "proveedores";
+type TabKey =
+  | "general"
+  | "finanzas"
+  | "tributario"
+  | "ventas"
+  | "inventario"
+  | "devoluciones"
+  | "proveedores";
 
 export function ReportsDashboardClient({
   initialData,
@@ -97,6 +107,8 @@ export function ReportsDashboardClient({
 
   const tabs: Array<{ key: TabKey; label: string; icon: any }> = [
     { key: "general", label: "Visión General", icon: LayoutDashboard },
+    { key: "finanzas", label: "Finanzas & Márgenes", icon: DollarSign },
+    { key: "tributario", label: "SUNAT (Formulario 621)", icon: FileSpreadsheet },
     { key: "ventas", label: "Ventas & Clientes", icon: TrendingUp },
     { key: "inventario", label: "Inventario & Kardex", icon: Package },
     { key: "devoluciones", label: "Garantías & RMA", icon: RotateCcw },
@@ -204,6 +216,10 @@ export function ReportsDashboardClient({
       <div className="mt-4">
         {activeTab === "general" && (
           <div className="space-y-6">
+            <FinancialAnalyticsTab
+              finanzas={data.finanzas}
+              topProductos={data.topProductos}
+            />
             <SalesAnalyticsTab
               ventasPorFecha={data.ventasPorFecha}
               ventasPorComprobante={data.ventasPorComprobante}
@@ -214,6 +230,17 @@ export function ReportsDashboardClient({
               clientesAnalytics={data.clientesAnalytics}
             />
           </div>
+        )}
+
+        {activeTab === "finanzas" && (
+          <FinancialAnalyticsTab
+            finanzas={data.finanzas}
+            topProductos={data.topProductos}
+          />
+        )}
+
+        {activeTab === "tributario" && (
+          <TaxAnalyticsTab tributario={data.tributario} />
         )}
 
         {activeTab === "ventas" && (

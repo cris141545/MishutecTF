@@ -1,5 +1,5 @@
 import { getPool } from "@/lib/db";
-import sql from "mssql/msnodesqlv8";
+import sql from "mssql";
 import {
   DashboardData,
   DashboardKpis,
@@ -34,7 +34,7 @@ export async function getDashboardData(lowStockThreshold: number = 5): Promise<D
       (SELECT COUNT(*) FROM dbo.Producto WHERE Stock = 0) AS ProductosAgotados,
       (SELECT COUNT(*) FROM dbo.Producto WHERE Stock > 0 AND Stock <= @threshold) AS ProductosStockBajo,
       DB_NAME() AS ActiveDb,
-      SUSER_SNAME() AS WindowsUser,
+      SUSER_SNAME() AS DatabaseUser,
       SUBSTRING(@@VERSION, 1, CHARINDEX(' - ', @@VERSION) - 1) AS SqlVersion
   `);
 
@@ -216,7 +216,7 @@ export async function getDashboardData(lowStockThreshold: number = 5): Promise<D
     recentMovements,
     serverInfo: {
       activeDatabase: String(kpiRow.ActiveDb || "MishutecT2"),
-      windowsUser: String(kpiRow.WindowsUser || "DESKTOP-QV4VK5K\\USER"),
+      databaseUser: String(kpiRow.DatabaseUser || "SQL Server"),
       sqlVersion: String(kpiRow.SqlVersion || "Microsoft SQL Server"),
       queriedAt: new Date().toISOString(),
     },

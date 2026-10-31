@@ -45,6 +45,7 @@ export const config = {
     "/empleados/:path*",
     "/devoluciones/:path*",
     "/reportes/:path*",
+    "/usuarios/:path*",
     "/diagnostico/:path*",
   ],
 };

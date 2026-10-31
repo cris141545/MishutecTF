@@ -1,8 +1,10 @@
-import sql from "mssql/msnodesqlv8";
+import sql from "mssql";
 import { getPool } from "../db";
 import {
   ReportFilterParams,
   ReportKpiMetrics,
+  FinancialAnalytics,
+  TaxSummarySunat,
   SalesByDateItem,
   SalesByVoucherType,
   SalesByPaymentMethod,
@@ -366,6 +368,7 @@ export async function getSalesByPaymentMethod(filters: ReportFilterParams = {}):
       montoPagado: monto,
       transaccionesCount: Number(r.transaccionesCount || 0),
       porcentaje: pct,
+      esEfectivoFisico: Number(r.idMetodo) === 1,
     };
   });
 }
@@ -380,6 +383,11 @@ export async function getTopSellingProducts(filters: ReportFilterParams = {}): P
       SELECT v.ID_venta
       FROM dbo.Venta v
       WHERE 1=1 ${whereSql}
+    ),
+    CostosProd AS (
+      SELECT s.Codbarras_prod, AVG(s.Precio_compra) AS costoCompra
+      FROM dbo.Suministra s
+      GROUP BY s.Codbarras_prod
     )
     SELECT 
       p.Codbarras_prod AS codbarras,
@@ -387,32 +395,46 @@ export async function getTopSellingProducts(filters: ReportFilterParams = {}): P
       c.Nombre_cat AS categoria,
       m.Nombre_marca AS marca,
       p.Precio AS precioUnitario,
+      ISNULL(cp.costoCompra, p.Precio * 0.65) AS costoUnitario,
       p.Stock AS stockActual,
       ISNULL(SUM(dv.Cantidad), 0) AS unidadesVendidas,
       ISNULL(SUM(dv.Subtotal), 0) AS totalFacturado
     FROM dbo.Producto p
     JOIN dbo.Categoria c ON p.ID_categoria = c.ID_categoria
     JOIN dbo.Marca m ON p.ID_marca = m.ID_marca
+    LEFT JOIN CostosProd cp ON p.Codbarras_prod = cp.Codbarras_prod
     LEFT JOIN dbo.Detalle_Venta dv ON p.Codbarras_prod = dv.Codbarras_prod
       AND dv.ID_venta IN (SELECT vf.ID_venta FROM VentasFiltradas vf)
     WHERE 1=1 ${productWhereSql}
-    GROUP BY p.Codbarras_prod, p.Nombre_prod, c.Nombre_cat, m.Nombre_marca, p.Precio, p.Stock
+    GROUP BY p.Codbarras_prod, p.Nombre_prod, c.Nombre_cat, m.Nombre_marca, p.Precio, cp.costoCompra, p.Stock
     HAVING ISNULL(SUM(dv.Cantidad), 0) > 0
     ORDER BY unidadesVendidas DESC, totalFacturado DESC;
   `;
 
   const res = await req.query(query);
 
-  return res.recordset.map((r: any) => ({
-    codbarras: String(r.codbarras),
-    nombreProd: String(r.nombreProd),
-    categoria: String(r.categoria),
-    marca: String(r.marca),
-    precioUnitario: Number(r.precioUnitario),
-    stockActual: Number(r.stockActual),
-    unidadesVendidas: Number(r.unidadesVendidas),
-    totalFacturado: Number(r.totalFacturado),
-  }));
+  return res.recordset.map((r: any) => {
+    const precio = Number(r.precioUnitario);
+    const costo = Number(r.costoUnitario);
+    const cant = Number(r.unidadesVendidas);
+    const tot = Number(r.totalFacturado);
+    const ganancia = Math.round((tot - cant * costo) * 100) / 100;
+    const margen = tot > 0 ? Number(((ganancia / tot) * 100).toFixed(1)) : 0;
+
+    return {
+      codbarras: String(r.codbarras),
+      nombreProd: String(r.nombreProd),
+      categoria: String(r.categoria),
+      marca: String(r.marca),
+      precioUnitario: precio,
+      costoUnitario: costo,
+      stockActual: Number(r.stockActual),
+      unidadesVendidas: cant,
+      totalFacturado: tot,
+      gananciaGenerada: ganancia,
+      margenPorcentaje: margen,
+    };
+  });
 }
 
 export async function getSalesByCategory(filters: ReportFilterParams = {}): Promise<SalesByCategory[]> {
@@ -958,11 +980,280 @@ export async function getReturnsAnalytics(filters: ReportFilterParams = {}): Pro
   };
 }
 
+export async function getFinancialAnalytics(filters: ReportFilterParams = {}): Promise<FinancialAnalytics> {
+  const pool = await getPool();
+  const req = pool.request();
+  const { whereSql } = buildSalesConditions(filters, req);
+
+  // 1. Total ventas brutas
+  const salesQuery = `
+    SELECT ISNULL(SUM(v.Total_venta), 0) AS ventasBrutas
+    FROM dbo.Venta v
+    WHERE 1=1 ${whereSql};
+  `;
+  const salesRes = await req.query(salesQuery);
+  const ventasBrutas = Number(salesRes.recordset[0]?.ventasBrutas || 0);
+
+  // 2. Total devoluciones aprobadas en el rango
+  const devReq = pool.request();
+  if (filters.fechaDesde) devReq.input("fDesde", sql.VarChar(10), filters.fechaDesde);
+  if (filters.fechaHasta) devReq.input("fHasta", sql.VarChar(10), filters.fechaHasta);
+
+  const devQuery = `
+    SELECT ISNULL(SUM(dd.Cantidad_dev * dv.Precio_unitario), 0) AS devolucionesMonto
+    FROM dbo.Detalle_Dev dd
+    JOIN dbo.Devolucion d ON dd.ID_devolucion = d.ID_devolucion
+    JOIN dbo.Detalle_Venta dv ON dd.ID_detalle = dv.ID_detalle
+    WHERE d.ID_estado_dev = 2
+      ${filters.fechaDesde ? "AND d.Fecha_dev >= @fDesde" : ""}
+      ${filters.fechaHasta ? "AND d.Fecha_dev <= @fHasta" : ""};
+  `;
+  const devRes = await devReq.query(devQuery);
+  const devolucionesMonto = Number(devRes.recordset[0]?.devolucionesMonto || 0);
+
+  // 3. Ventas netas
+  const ventasNetasTotal = Math.max(0, ventasBrutas - devolucionesMonto);
+  const ventasNetasSinImpuestos = Math.round((ventasNetasTotal / 1.18) * 100) / 100;
+
+  // 4. Costo de ventas real (COGS) según dbo.Suministra
+  const cogsReq = pool.request();
+  const { whereSql: cogsWhere } = buildSalesConditions(filters, cogsReq);
+
+  const cogsQuery = `
+    ;WITH CostosPorProducto AS (
+      SELECT 
+        s.Codbarras_prod,
+        AVG(s.Precio_compra) AS CostoPromedio
+      FROM dbo.Suministra s
+      GROUP BY s.Codbarras_prod
+    ),
+    DevolucionesPorDetalle AS (
+      SELECT 
+        dd.ID_detalle,
+        SUM(dd.Cantidad_dev) AS CantidadDevuelta
+      FROM dbo.Detalle_Dev dd
+      JOIN dbo.Devolucion d ON dd.ID_devolucion = d.ID_devolucion
+      WHERE d.ID_estado_dev = 2
+      GROUP BY dd.ID_detalle
+    )
+    SELECT 
+      ISNULL(SUM(
+        (dv.Cantidad - ISNULL(dpd.CantidadDevuelta, 0)) * 
+        ISNULL(cp.CostoPromedio, dv.Precio_unitario * 0.65)
+      ), 0) AS costoVentas
+    FROM dbo.Detalle_Venta dv
+    JOIN dbo.Venta v ON dv.ID_venta = v.ID_venta
+    LEFT JOIN CostosPorProducto cp ON dv.Codbarras_prod = cp.Codbarras_prod
+    LEFT JOIN DevolucionesPorDetalle dpd ON dv.ID_detalle = dpd.ID_detalle
+    WHERE 1=1 ${cogsWhere};
+  `;
+  const cogsRes = await cogsReq.query(cogsQuery);
+  const costoVentas = Math.round(Number(cogsRes.recordset[0]?.costoVentas || 0) * 100) / 100;
+
+  // 5. Ganancia bruta y margen bruto %
+  const gananciaBruta = Math.round((ventasNetasSinImpuestos - costoVentas) * 100) / 100;
+  const margenBrutoPorcentaje =
+    ventasNetasSinImpuestos > 0 ? Number(((gananciaBruta / ventasNetasSinImpuestos) * 100).toFixed(2)) : 0;
+
+  // 6. Gastos operativos, pagos a personal, pagos a proveedores y retiros de caja
+  const cashReq = pool.request();
+  const cashRes = await cashReq.query(`
+    SELECT 
+      ISNULL(SUM(CASE WHEN Categoria = 'GASTO_OPERATIVO' THEN Monto ELSE 0 END), 0) AS gastosOperativos,
+      ISNULL(SUM(CASE WHEN Categoria = 'PAGO_PERSONAL' THEN Monto ELSE 0 END), 0) AS pagosPersonal,
+      ISNULL(SUM(CASE WHEN Categoria = 'PAGO_PROVEEDOR' THEN Monto ELSE 0 END), 0) AS pagosProveedores,
+      ISNULL(SUM(CASE WHEN Categoria = 'RETIRO' THEN Monto ELSE 0 END), 0) AS retirosEfectivo,
+      ISNULL(SUM(CASE WHEN Tipo = 'INGRESO' AND Afecta_efectivo = 1 THEN Monto ELSE 0 END), 0) -
+      ISNULL(SUM(CASE WHEN Tipo = 'EGRESO' AND Afecta_efectivo = 1 THEN Monto ELSE 0 END), 0) AS flujoEfectivoNeto
+    FROM dbo.Movimiento_Caja;
+  `);
+
+  const gastosOperativos = Number(cashRes.recordset[0]?.gastosOperativos || 0);
+  const pagosPersonal = Number(cashRes.recordset[0]?.pagosPersonal || 0);
+  const pagosProveedores = Number(cashRes.recordset[0]?.pagosProveedores || 0);
+  const retirosEfectivo = Number(cashRes.recordset[0]?.retirosEfectivo || 0);
+  const flujoEfectivoNeto = Number(cashRes.recordset[0]?.flujoEfectivoNeto || 0);
+
+  // Saldos pendientes en deudas con proveedores y compromisos laborales
+  let cuentasPorPagarPendientes = 0;
+  try {
+    const cpRes = await pool.request().query(`
+      SELECT ISNULL(SUM(Saldo_pendiente), 0) AS saldo 
+      FROM dbo.Cuenta_Pagar_Proveedor 
+      WHERE Estado NOT IN ('PAGADA', 'ANULADA');
+    `);
+    cuentasPorPagarPendientes = Number(cpRes.recordset[0]?.saldo || 0);
+  } catch {}
+
+  let obligacionesPersonalPendientes = 0;
+  try {
+    const opRes = await pool.request().query(`
+      SELECT ISNULL(SUM(Saldo_pendiente), 0) AS saldo 
+      FROM dbo.Obligacion_Personal 
+      WHERE Estado NOT IN ('PAGADA', 'ANULADA');
+    `);
+    obligacionesPersonalPendientes = Number(opRes.recordset[0]?.saldo || 0);
+  } catch {}
+
+  // 7. Utilidad Operativa y margen neto %
+  // NOTA CONTABLE: El pago a proveedores de mercadería no se descuenta aquí porque el costo del inventario
+  // ya se reconoce mediante el Costo de Ventas (COGS) para evitar doble contabilización.
+  const utilidadOperativa = Math.round((gananciaBruta - gastosOperativos - pagosPersonal) * 100) / 100;
+  const margenNetoPorcentaje =
+    ventasNetasSinImpuestos > 0 ? Number(((utilidadOperativa / ventasNetasSinImpuestos) * 100).toFixed(2)) : 0;
+
+  return {
+    ventasBrutas,
+    descuentos: 0,
+    devolucionesMonto,
+    ventasNetasTotal,
+    ventasNetasSinImpuestos,
+    costoVentas,
+    gananciaBruta,
+    margenBrutoPorcentaje,
+    gastosOperativos,
+    pagosPersonal,
+    cuentasPorPagarPendientes,
+    pagosProveedores,
+    obligacionesPersonalPendientes,
+    retirosEfectivo,
+    utilidadOperativa,
+    margenNetoPorcentaje,
+    flujoEfectivoNeto,
+  };
+}
+
+export async function getTaxSummarySunat(filters: ReportFilterParams = {}): Promise<TaxSummarySunat> {
+  const pool = await getPool();
+
+  // 1. Configuración Tributaria (o fallback seguro)
+  let conf = {
+    Ruc: "20608945123",
+    Razon_social: "MISHUTEC HARDWARE S.A.C.",
+    Regimen_tributario: "MYPE Tributario",
+    Tasa_igv: 15.5,
+    Tasa_ipm: 2.5,
+    Tasa_total: 18.0,
+  };
+
+  try {
+    const confRes = await pool.request().query(`
+      SELECT TOP 1 
+        Ruc, Razon_social, Regimen_tributario, Tasa_igv, Tasa_ipm, Tasa_total
+      FROM dbo.Configuracion_Tributaria;
+    `);
+    if (confRes.recordset.length > 0) {
+      conf = confRes.recordset[0];
+    }
+  } catch {}
+
+  // 2. Ventas del período
+  const salesReq = pool.request();
+  const { whereSql } = buildSalesConditions(filters, salesReq);
+  const salesRes = await salesReq.query(`
+    SELECT ISNULL(SUM(Total_venta), 0) AS totalVentas
+    FROM dbo.Venta v
+    WHERE 1=1 ${whereSql};
+  `);
+  const ventasGravadasTotal = Number(salesRes.recordset[0]?.totalVentas || 0);
+  const baseImponibleVentas = Math.round((ventasGravadasTotal / 1.18) * 100) / 100;
+  const debitoFiscalIgvTotal = Math.round((ventasGravadasTotal - baseImponibleVentas) * 100) / 100;
+  const desgloseIgv = Math.round((baseImponibleVentas * 0.155) * 100) / 100;
+  const desgloseIpm = Math.round((baseImponibleVentas * 0.025) * 100) / 100;
+
+  // 3. Notas de crédito
+  let ajustesNotasCredito = 0;
+  try {
+    const ncRes = await pool.request().query(`
+      SELECT 
+        ISNULL(SUM(Monto_total), 0) AS totalNc,
+        ISNULL(SUM(Monto_igv), 0) AS igvNc
+      FROM dbo.Nota_Credito
+      WHERE Estado = 'EMITIDA';
+    `);
+    ajustesNotasCredito = Number(ncRes.recordset[0]?.igvNc || 0);
+  } catch {}
+  const debitoFiscalNeto = Math.max(0, Math.round((debitoFiscalIgvTotal - ajustesNotasCredito) * 100) / 100);
+
+  // 4. Compras registradas y Crédito Fiscal (según facturas con comprobante formal y Mov_Inventario)
+  let comprasRegistradasTotal = 0;
+  let baseImponibleCompras = 0;
+  let creditoFiscalSustentado = 0;
+
+  try {
+    const cpRes = await pool.request().query(`
+      SELECT 
+        ISNULL(SUM(Total), 0) AS totalFacturas,
+        ISNULL(SUM(Base_imponible), 0) AS baseCompras,
+        ISNULL(SUM(CASE WHEN Tiene_credito_fiscal = 1 THEN Impuesto ELSE 0 END), 0) AS creditoFiscal
+      FROM dbo.Cuenta_Pagar_Proveedor
+      WHERE Estado != 'ANULADA';
+    `);
+
+    if (cpRes.recordset.length > 0 && Number(cpRes.recordset[0]?.totalFacturas || 0) > 0) {
+      comprasRegistradasTotal = Number(cpRes.recordset[0].totalFacturas);
+      baseImponibleCompras = Number(cpRes.recordset[0].baseCompras);
+      creditoFiscalSustentado = Number(cpRes.recordset[0].creditoFiscal);
+    } else {
+      // Fallback a compras de inventario si no hay facturas directas
+      const compRes = await pool.request().query(`
+        ;WITH CostosSuministro AS (
+          SELECT Codbarras_prod, AVG(Precio_compra) AS CostoPromedio
+          FROM dbo.Suministra
+          GROUP BY Codbarras_prod
+        )
+        SELECT ISNULL(SUM(mi.Cantidad * cs.CostoPromedio), 0) AS totalCompras
+        FROM dbo.Mov_Inventario mi
+        JOIN CostosSuministro cs ON mi.Codbarras_prod = cs.Codbarras_prod
+        WHERE mi.ID_tipo_mov = 1;
+      `);
+      comprasRegistradasTotal = Number(compRes.recordset[0]?.totalCompras || 0);
+      baseImponibleCompras = Math.round((comprasRegistradasTotal / 1.18) * 100) / 100;
+      creditoFiscalSustentado = Math.round((baseImponibleCompras * 0.18) * 100) / 100;
+    }
+  } catch {}
+
+  // 5. Saldo y pago a cuenta
+  const saldoReferencialIgvMes = Math.round((debitoFiscalNeto - creditoFiscalSustentado) * 100) / 100;
+  const pagoCuentaRentaEstimado = Math.round((baseImponibleVentas * 0.01) * 100) / 100;
+
+  const now = new Date();
+  const periodoFiscal = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+
+  return {
+    ruc: String(conf.Ruc),
+    razonSocial: String(conf.Razon_social),
+    regimenTributario: String(conf.Regimen_tributario),
+    periodoFiscal,
+    ventasGravadasTotal,
+    ventasExoneradas: 0,
+    ventasInafectas: 0,
+    baseImponibleVentas,
+    tasaIgvPorcentaje: Number(conf.Tasa_igv || 15.5),
+    tasaIpmPorcentaje: Number(conf.Tasa_ipm || 2.5),
+    tasaTotalPorcentaje: Number(conf.Tasa_total || 18.0),
+    debitoFiscalIgvTotal,
+    desgloseIgv,
+    desgloseIpm,
+    ajustesNotasCredito,
+    debitoFiscalNeto,
+    comprasRegistradasTotal,
+    baseImponibleCompras,
+    creditoFiscalSustentado,
+    saldoReferencialIgvMes,
+    pagoCuentaRentaEstimado,
+    advertenciaLegal:
+      "Resumen fiscal referencial para control interno y simulación SUNAT (Formulario Virtual 621). Desglose 15.5% IGV + 2.5% IPM para 2026. Los montos no constituyen declaración jurada oficial.",
+  };
+}
+
 export async function getCompleteReportsPageData(
   filters: ReportFilterParams = {}
 ): Promise<CompleteReportsPageData> {
   const [
     kpis,
+    finanzas,
+    tributario,
     ventasPorFecha,
     ventasPorComprobante,
     ventasPorMetodoPago,
@@ -976,6 +1267,8 @@ export async function getCompleteReportsPageData(
     metadata,
   ] = await Promise.all([
     getReportKpis(filters),
+    getFinancialAnalytics(filters),
+    getTaxSummarySunat(filters),
     getSalesByDate(filters),
     getSalesByVoucherType(filters),
     getSalesByPaymentMethod(filters),
@@ -991,6 +1284,8 @@ export async function getCompleteReportsPageData(
 
   return {
     kpis,
+    finanzas,
+    tributario,
     ventasPorFecha,
     ventasPorComprobante,
     ventasPorMetodoPago,

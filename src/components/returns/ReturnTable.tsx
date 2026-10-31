@@ -120,9 +120,19 @@ export function ReturnTable({
                         <span className="font-mono font-bold text-slate-900 block">
                           {ret.numeroComprobante}
                         </span>
-                        <span className="text-[11px] text-slate-500">
+                        <span className="text-[11px] text-slate-500 block">
                           Vendido el {formatDate(ret.fechaVenta)}
                         </span>
+                        {ret.tieneNotaCredito && ret.numeroNotaCredito && (
+                          <span className="inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.2 rounded bg-purple-50 text-purple-700 border border-purple-200 text-[10px] font-mono font-semibold">
+                            NC: {ret.numeroNotaCredito}
+                          </span>
+                        )}
+                        {ret.montoReembolsado && ret.montoReembolsado > 0 && (
+                          <span className="inline-flex items-center gap-1 mt-0.5 ml-1 px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-mono">
+                            Reemb: S/{ret.montoReembolsado.toFixed(2)}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </td>

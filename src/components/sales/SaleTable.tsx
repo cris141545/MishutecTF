@@ -28,6 +28,43 @@ export function SaleTable({ sales, onViewDetail }: SaleTableProps) {
     currentPage * ITEMS_PER_PAGE
   );
 
+  const renderSaleStatusBadge = (estado?: string) => {
+    const st = estado?.toUpperCase() || "COMPLETADA";
+    switch (st) {
+      case "TOTALMENTE DEVUELTA":
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 border border-rose-200 text-rose-700">
+            Totalmente Devuelta
+          </span>
+        );
+      case "PARCIALMENTE DEVUELTA":
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 border border-amber-200 text-amber-700">
+            Parcialmente Devuelta
+          </span>
+        );
+      case "PENDIENTE":
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 border border-blue-200 text-blue-700">
+            Pendiente
+          </span>
+        );
+      case "ANULADA":
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 border border-slate-300 text-slate-600">
+            Anulada
+          </span>
+        );
+      case "COMPLETADA":
+      default:
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 border border-emerald-200 text-emerald-700">
+            Completada
+          </span>
+        );
+    }
+  };
+
   if (sales.length === 0) {
     return (
       <div className="p-8 text-center rounded-xl bg-white border border-slate-200 text-slate-500 shadow-xs">
@@ -68,6 +105,9 @@ export function SaleTable({ sales, onViewDetail }: SaleTableProps) {
                   >
                     {sale.tipoComprobante}
                   </span>
+                  <div className="mt-1">
+                    {renderSaleStatusBadge(sale.estado)}
+                  </div>
                 </div>
               </div>
               <div className="text-right shrink-0">
@@ -124,6 +164,7 @@ export function SaleTable({ sales, onViewDetail }: SaleTableProps) {
                 <th className="py-3 px-4">Cliente</th>
                 <th className="py-3 px-4">Atendido por</th>
                 <th className="py-3 px-4">Método de Pago</th>
+                <th className="py-3 px-4 text-center">Estado</th>
                 <th className="py-3 px-4 text-center">Ítems</th>
                 <th className="py-3 px-4 text-right">Total</th>
                 <th className="py-3 px-4 text-center">Acciones</th>
@@ -181,6 +222,11 @@ export function SaleTable({ sales, onViewDetail }: SaleTableProps) {
                     <span className="inline-block px-2 py-0.5 rounded text-[11px] bg-slate-50 text-slate-700 border border-slate-200 font-medium whitespace-nowrap">
                       {sale.metodosPago}
                     </span>
+                  </td>
+
+                  {/* Estado */}
+                  <td className="py-3 px-4 text-center whitespace-nowrap">
+                    {renderSaleStatusBadge(sale.estado)}
                   </td>
 
                   {/* Ítems */}

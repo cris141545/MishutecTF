@@ -240,7 +240,7 @@ export function InventoryProductTable({
                         className="inline-flex items-center gap-1 px-3 py-2 min-h-[38px] rounded-lg bg-emerald-50 hover:bg-emerald-100 active:bg-emerald-100 text-emerald-700 border border-emerald-200 text-xs font-semibold transition-colors shadow-xs"
                       >
                         <ArrowDownRight className="h-3.5 w-3.5" />
-                        <span>Entrada</span>
+                        <span>Comprar</span>
                       </button>
 
                       <button
@@ -364,7 +364,7 @@ export function InventoryProductTable({
                             <button
                               type="button"
                               onClick={() => onOpenEntry(p)}
-                              title="Registrar entrada de stock"
+                              title="Comprar este producto"
                               className="p-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 transition-colors shadow-xs"
                             >
                               <ArrowDownRight className="h-3.5 w-3.5" />

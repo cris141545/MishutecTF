@@ -12,7 +12,7 @@ export interface ReportFilterParams {
   dniCliente?: string;
   idTipoComp?: number;
   idMetodoPago?: number;
-  preset?: "today" | "last7" | "last30" | "thisMonth" | "all";
+  preset?: "today" | "yesterday" | "last7" | "last30" | "thisMonth" | "all";
 }
 
 export interface ReportKpiMetrics {
@@ -31,7 +31,7 @@ export interface ReportKpiMetrics {
   devolucionesRechazadas: number;
   unidadesDevueltasTotal: number;
   tasaRetornoUnidades: number;
-  // Indicadores RMA desglosados (H-03)
+  // Indicadores RMA desglosados
   unidadesReclamadasTotal: number;
   unidadesAprobadasTotal: number;
   unidadesRechazadasTotal: number;
@@ -42,12 +42,59 @@ export interface ReportKpiMetrics {
   tasaReingresoKardex: number;
 }
 
+export interface FinancialAnalytics {
+  ventasBrutas: number;
+  descuentos: number;
+  devolucionesMonto: number;
+  ventasNetasTotal: number;
+  ventasNetasSinImpuestos: number;
+  costoVentas: number; // Costo de adquisición de productos vendidos según Suministra
+  gananciaBruta: number; // VentasNetasSinImpuestos - CostoVentas
+  margenBrutoPorcentaje: number; // (GananciaBruta / VentasNetasSinImpuestos) * 100
+  gastosOperativos: number; // Movimientos de caja tipo GASTO_OPERATIVO
+  pagosPersonal?: number; // Pagos directos al personal
+  cuentasPorPagarPendientes?: number; // Saldo de deudas con proveedores
+  pagosProveedores?: number; // Pagos realizados a proveedores
+  obligacionesPersonalPendientes?: number; // Saldo pendiente en obligaciones laborales
+  retirosEfectivo: number; // Retiros de caja (no afectan utilidad)
+  utilidadOperativa: number; // GananciaBruta - GastosOperativos
+  margenNetoPorcentaje: number; // (UtilidadOperativa / VentasNetasSinImpuestos) * 100
+  flujoEfectivoNeto: number; // Cobros efectivo + Ingresos efectivo - Gastos - Retiros - Reembolsos
+}
+
+export interface TaxSummarySunat {
+  ruc: string;
+  razonSocial: string;
+  regimenTributario: string;
+  periodoFiscal: string;
+  ventasGravadasTotal: number;
+  ventasExoneradas: number;
+  ventasInafectas: number;
+  baseImponibleVentas: number;
+  tasaIgvPorcentaje: number; // 15.5%
+  tasaIpmPorcentaje: number; // 2.5%
+  tasaTotalPorcentaje: number; // 18.0%
+  debitoFiscalIgvTotal: number; // 18% sobre base imponible
+  desgloseIgv: number; // 15.5%
+  desgloseIpm: number; // 2.5%
+  ajustesNotasCredito: number; // Reducción de débito fiscal por devoluciones con NC
+  debitoFiscalNeto: number;
+  comprasRegistradasTotal: number;
+  baseImponibleCompras: number;
+  creditoFiscalSustentado: number;
+  saldoReferencialIgvMes: number; // Débito fiscal neto - Crédito fiscal
+  pagoCuentaRentaEstimado: number; // 1.0% sobre ingresos netos para MYPE Tributario
+  advertenciaLegal: string;
+}
+
 export interface SalesByDateItem {
   fecha: string;
   totalVenta: number;
   comprobantesCount: number;
   unidadesVendidas: number;
   acumulado: number;
+  costoEstimado?: number;
+  gananciaEstimada?: number;
 }
 
 export interface SalesByVoucherType {
@@ -64,6 +111,7 @@ export interface SalesByPaymentMethod {
   montoPagado: number;
   transaccionesCount: number;
   porcentaje: number;
+  esEfectivoFisico: boolean;
 }
 
 export interface TopSellingProduct {
@@ -72,8 +120,11 @@ export interface TopSellingProduct {
   categoria: string;
   marca: string;
   precioUnitario: number;
+  costoUnitario: number;
   unidadesVendidas: number;
   totalFacturado: number;
+  gananciaGenerada: number;
+  margenPorcentaje: number;
   stockActual: number;
 }
 
@@ -226,7 +277,6 @@ export interface ReturnsAnalytics {
     totalVendidas: number;
     totalDevueltas: number;
     tasaRetorno: number;
-    // Indicadores RMA desglosados (H-03)
     unidadesReclamadasTotal: number;
     unidadesAprobadasTotal: number;
     unidadesRechazadasTotal: number;
@@ -248,6 +298,8 @@ export interface ReportsFilterMetadata {
 
 export interface CompleteReportsPageData {
   kpis: ReportKpiMetrics;
+  finanzas: FinancialAnalytics;
+  tributario: TaxSummarySunat;
   ventasPorFecha: SalesByDateItem[];
   ventasPorComprobante: SalesByVoucherType[];
   ventasPorMetodoPago: SalesByPaymentMethod[];

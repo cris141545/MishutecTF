@@ -1,8 +1,16 @@
+export type SaleStatus =
+  | "PENDIENTE"
+  | "COMPLETADA"
+  | "PARCIALMENTE DEVUELTA"
+  | "TOTALMENTE DEVUELTA"
+  | "ANULADA";
+
 export interface SaleListItem {
   idVenta: number;
   numeroComprobante: string;
   fecha: string;
   total: number;
+  estado?: SaleStatus;
   idTipoComp: number;
   tipoComprobante: string;
   dniCliente: string;
@@ -34,6 +42,7 @@ export interface SaleDetail {
   numeroComprobante: string;
   fecha: string;
   total: number;
+  estado?: SaleStatus;
   idTipoComp: number;
   tipoComprobante: string;
   dniCliente: string;
@@ -47,6 +56,8 @@ export interface SaleDetail {
   sumDetalles: number;
   sumPagos: number;
   isReconciled: boolean;
+  efectivoRecibido?: number | null;
+  vuelto?: number | null;
 }
 
 export interface SalesKpis {

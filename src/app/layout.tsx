@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import Script from "next/script";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme/ThemeProvider";
 
@@ -25,10 +26,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <head>
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `
+      <body className="min-h-full flex flex-col transition-colors duration-0">
+        <Script id="theme-init" strategy="beforeInteractive">
+          {`
               (function() {
                 try {
                   var saved = localStorage.getItem('mishutec-theme');
@@ -42,11 +42,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   }
                 } catch (e) {}
               })();
-            `,
-          }}
-        />
-      </head>
-      <body className="min-h-full flex flex-col transition-colors duration-0">
+          `}
+        </Script>
         <ThemeProvider>{children}</ThemeProvider>
       </body>
     </html>

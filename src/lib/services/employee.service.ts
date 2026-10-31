@@ -1,5 +1,5 @@
 import { revalidatePath } from "next/cache";
-import { requireAdminSession } from "../auth/session";
+import { requireAdminSession } from "../auth/authorization";
 import {
   getEmployeesList,
   getEmployeeDetail,

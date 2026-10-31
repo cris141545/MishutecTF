@@ -9,12 +9,16 @@ interface AdminLayoutClientProps {
   children: React.ReactNode;
   dbName: string;
   isAcademic: boolean;
+  username: string;
+  isAdmin: boolean;
 }
 
 export function AdminLayoutClient({
   children,
   dbName,
   isAcademic,
+  username,
+  isAdmin,
 }: AdminLayoutClientProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -45,7 +49,7 @@ export function AdminLayoutClient({
     <div className="h-screen h-[100dvh] flex overflow-hidden bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-sans antialiased selection:bg-blue-500/20 selection:text-blue-700">
       {/* Sidebar Escritorio (fijo para pantallas lg+) */}
       <div className="hidden lg:flex lg:flex-shrink-0 h-full">
-        <Sidebar dbName={dbName} isAcademic={isAcademic} />
+        <Sidebar dbName={dbName} isAcademic={isAcademic} isAdmin={isAdmin} />
       </div>
 
       {/* Drawer Móvil para pantallas pequeñas */}
@@ -78,6 +82,7 @@ export function AdminLayoutClient({
             <Sidebar
               dbName={dbName}
               isAcademic={isAcademic}
+              isAdmin={isAdmin}
               onNavigate={() => setMobileOpen(false)}
             />
           </div>
@@ -89,6 +94,7 @@ export function AdminLayoutClient({
         <Header
           dbName={dbName}
           isAcademic={isAcademic}
+          username={username}
           onToggleMobile={() => setMobileOpen(true)}
         />
         <main className="flex-1 p-3.5 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto space-y-6">

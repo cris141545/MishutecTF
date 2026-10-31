@@ -1,4 +1,4 @@
-import { requireAdminSession } from "@/lib/auth/session";
+import { requireAdminSession } from "@/lib/auth/authorization";
 import {
   createProductSchema,
   updateProductSchema,

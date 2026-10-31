@@ -24,6 +24,7 @@ import { getSession } from "@/lib/auth/session";
 
 // Exclusivamente ejecución en Node.js runtime
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   const data = await getDashboardData(5);
